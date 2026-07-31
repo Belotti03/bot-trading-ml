@@ -25,7 +25,7 @@ jobs:
       - name: 3. Installa le librerie necessarie
         run: |
           python -m pip install --upgrade pip
-          pip install yfinance xgboost pandas joblib requests
+          pip install yfinance xgboost pandas joblib requests scikit-learn
 
       - name: 4. Addestra i Modelli ed Esegui l'Analisi
         run: |
