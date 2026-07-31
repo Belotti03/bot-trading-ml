@@ -1,0 +1,29 @@
+{
+    "initial_capital": 10000.0,
+    "positions": {
+        "BTC-USD": {
+            "action": "LONG",
+            "entry_price": 62927.98828125,
+            "allocated_capital": 2500.0,
+            "current_value": 2500.0
+        },
+        "NVDA": {
+            "action": "CASH",
+            "entry_price": 0.0,
+            "allocated_capital": 2500.0,
+            "current_value": 2500.0
+        },
+        "QQQ": {
+            "action": "LONG",
+            "entry_price": 689.8200073242188,
+            "allocated_capital": 2500.0,
+            "current_value": 2500.0
+        },
+        "GLD": {
+            "action": "CASH",
+            "entry_price": 0.0,
+            "allocated_capital": 2500.0,
+            "current_value": 2500.0
+        }
+    }
+}
