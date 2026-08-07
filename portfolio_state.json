@@ -8,8 +8,8 @@
             "current_value": 2492.3444549868354
         },
         "NVDA": {
-            "action": "CASH",
-            "entry_price": 0.0,
+            "action": "SHORT",
+            "entry_price": 218.99000549316406,
             "allocated_capital": 2661.7427966715627,
             "current_value": 2661.7427966715627
         },
