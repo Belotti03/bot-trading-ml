@@ -2,9 +2,8 @@ name: Bot Trading ML Automation
 
 on:
   schedule:
-    # 20:30 UTC = 22:30 Italiane
-    - cron: '30 20 * * *'
-  workflow_dispatch: # Permette di avviare il test manuale in qualsiasi momento
+    - cron: '37 20 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -22,12 +21,12 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: 3. Installa le librerie necessarie
+      - name: 3. Installa le librerie necessarie (Ensemble)
         run: |
           python -m pip install --upgrade pip
-          pip install yfinance xgboost pandas joblib requests scikit-learn
+          pip install yfinance xgboost lightgbm scikit-learn pandas joblib requests
 
-      - name: 4. Addestra i Modelli ed Esegui l'Analisi
+      - name: 4. Addestra l'Ensemble ed Esegui l'Analisi
         run: |
           python model_engine.py
           python main.py
