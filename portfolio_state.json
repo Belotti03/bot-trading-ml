@@ -8,16 +8,16 @@
             "current_value": 2495.5840653075666
         },
         "NVDA": {
-            "action": "LONG",
-            "entry_price": 219.74000549316406,
-            "allocated_capital": 2568.4287873969183,
-            "current_value": 2568.4287873969183
+            "action": "CASH",
+            "entry_price": 0.0,
+            "allocated_capital": 2542.947787142378,
+            "current_value": 2542.947787142378
         },
         "QQQ": {
             "action": "LONG",
-            "entry_price": 717.510009765625,
-            "allocated_capital": 2590.8642179032067,
-            "current_value": 2590.8642179032067
+            "entry_price": 716.0800170898438,
+            "allocated_capital": 2585.7006427542615,
+            "current_value": 2585.7006427542615
         },
         "GLD": {
             "action": "CASH",
