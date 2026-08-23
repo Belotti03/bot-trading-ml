@@ -2,10 +2,10 @@
     "initial_capital": 10000.0,
     "positions": {
         "BTC-USD": {
-            "action": "LONG",
-            "entry_price": 76974.0625,
-            "allocated_capital": 2495.5840653075666,
-            "current_value": 2495.5840653075666
+            "action": "CASH",
+            "entry_price": 0.0,
+            "allocated_capital": 2514.65983221834,
+            "current_value": 2514.65983221834
         },
         "NVDA": {
             "action": "CASH",
