@@ -14,16 +14,16 @@
             "current_value": 2517.969732953323
         },
         "QQQ": {
-            "action": "CASH",
-            "entry_price": 0.0,
+            "action": "LONG",
+            "entry_price": 706.3200073242188,
             "allocated_capital": 2567.10436703111,
             "current_value": 2567.10436703111
         },
         "GLD": {
             "action": "SHORT",
-            "entry_price": 423.3599853515625,
-            "allocated_capital": 2663.394327808459,
-            "current_value": 2663.394327808459
+            "entry_price": 426.69000244140625,
+            "allocated_capital": 2642.4449019404706,
+            "current_value": 2642.4449019404706
         }
     }
 }
