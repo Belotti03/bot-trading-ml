@@ -8,89 +8,106 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 STATE_FILE = "portfolio_state.json"
 SCOUT_FILE = "scout_signals.json"
 
-if not os.path.exists(STATE_FILE):
-    state = {
-        "cash": 10000.0,
-        "positions": {},
-        "initial_balance": 10000.0
-    }
-else:
-    with open(STATE_FILE, "r") as f:
-        state = json.load(f)
+state = {"cash": 10000.0, "positions": {}, "initial_balance": 10000.0}
+if os.path.exists(STATE_FILE):
+    try:
+        with open(STATE_FILE, "r") as f:
+            loaded_state = json.load(f)
+            if isinstance(loaded_state, dict):
+                state.update(loaded_state)
+    except Exception as e:
+        print(f"Errore lettura portfolio_state: {e}")
 
-with open(SCOUT_FILE, "r") as f:
-    scout = json.load(f)
+scout = {}
+if os.path.exists(SCOUT_FILE):
+    try:
+        with open(SCOUT_FILE, "r") as f:
+            scout = json.load(f)
+    except Exception as e:
+        print(f"Errore lettura scout_signals: {e}")
 
-ranked = sorted(scout.items(), key=lambda x: x[1]['prob'], reverse=True)
-top_candidates = [ticker for ticker, data in ranked if data['prob'] > 0.55][:5]
+ranked = sorted(scout.items(), key=lambda x: x[1].get('prob', 0), reverse=True)
+top_candidates = [ticker for ticker, data in ranked if data.get('prob', 0) > 0.55][:5]
 
 events = []
 updated_positions = {}
-current_cash = state.get("cash", 10000.0)
+current_cash = float(state.get("cash", 10000.0))
 
-# 1. Trailing Stop (-2.5% dal picco massimo) & Stop Loss (-2% dall'ingresso)
-for ticker, pos in state.get("positions", {}).items():
-    if ticker in scout:
-        curr_price = scout[ticker]["price"]
-        entry_price = pos.get("entry_price", curr_price)
-        peak_price = max(pos.get("peak_price", curr_price), curr_price)
-        qty = pos["qty"]
+raw_positions = state.get("positions", {})
+if not isinstance(raw_positions, dict):
+    raw_positions = {}
+
+for ticker, pos in raw_positions.items():
+    if not isinstance(pos, dict):
+        continue
         
-        trailing_stop_price = peak_price * 0.975 # Trailing Stop dinamico
-        stop_loss_price = entry_price * 0.98     # Protezione del capitale
-        
-        if curr_price <= trailing_stop_price and curr_price > entry_price:
-            profit_pct = ((curr_price - entry_price) / entry_price) * 100
-            current_cash += qty * curr_price
-            events.append(f"🎯 **TRAILING-STOP ({profit_pct:+.1f}%) su {ticker}** (Incassato a ${curr_price:.2f})")
-        elif curr_price <= stop_loss_price:
-            loss_pct = ((curr_price - entry_price) / entry_price) * 100
-            current_cash += qty * curr_price
-            events.append(f"🛡️ **STOP-LOSS ({loss_pct:+.1f}%) su {ticker}** (Uscita a ${curr_price:.2f})")
-        else:
-            pos["peak_price"] = peak_price
-            updated_positions[ticker] = pos
+    curr_price = scout.get(ticker, {}).get("price", pos.get("entry_price", 1.0))
+    entry_price = pos.get("entry_price", curr_price)
+    peak_price = max(pos.get("peak_price", curr_price), curr_price)
+    qty = pos.get("qty", 0.0)
+    
+    if qty <= 0:
+        continue
+
+    trailing_stop_price = peak_price * 0.975
+    stop_loss_price = entry_price * 0.98
+    
+    if curr_price <= trailing_stop_price and curr_price > entry_price:
+        profit_pct = ((curr_price - entry_price) / entry_price) * 100
+        current_cash += qty * curr_price
+        events.append(f"🎯 **TRAILING-STOP ({profit_pct:+.1f}%) su {ticker}** (${curr_price:.2f})")
+    elif curr_price <= stop_loss_price:
+        loss_pct = ((curr_price - entry_price) / entry_price) * 100
+        current_cash += qty * curr_price
+        events.append(f"🛡️ **STOP-LOSS ({loss_pct:+.1f}%) su {ticker}** (${curr_price:.2f})")
+    else:
+        updated_positions[ticker] = {
+            "qty": qty,
+            "entry_price": entry_price,
+            "peak_price": peak_price
+        }
 
 state["cash"] = current_cash
 state["positions"] = updated_positions
 
-# 2. Allocazione sui Top 5 Asset dello Scout
 if top_candidates and state["cash"] > 500:
     alloc_per_asset = state["cash"] / len(top_candidates)
     for ticker in top_candidates:
-        if ticker not in state["positions"]:
-            curr_price = scout[ticker]["price"]
-            qty = alloc_per_asset / curr_price
-            state["positions"][ticker] = {
-                "qty": qty,
-                "entry_price": curr_price,
-                "peak_price": curr_price
-            }
-            state["cash"] -= alloc_per_asset
-            events.append(f"🚀 **ENTRATA AGENTE SCOUT:** {ticker} a ${curr_price:.2f} (Prob: {scout[ticker]['prob']*100:.1f}%)")
+        if ticker not in state["positions"] and ticker in scout:
+            curr_price = scout[ticker].get("price", 0)
+            if curr_price > 0:
+                qty = alloc_per_asset / curr_price
+                state["positions"][ticker] = {
+                    "qty": qty,
+                    "entry_price": curr_price,
+                    "peak_price": curr_price
+                }
+                state["cash"] -= alloc_per_asset
+                events.append(f"🚀 **ENTRATA SCOUT:** {ticker} a ${curr_price:.2f} (Prob: {scout[ticker].get('prob',0)*100:.1f}%)")
 
-# 3. Generazione Report Telegram
 total_val = state["cash"]
 pos_report = []
 
 for ticker, pos in state["positions"].items():
-    c_price = scout[ticker]["price"] if ticker in scout else pos["entry_price"]
+    c_price = scout.get(ticker, {}).get("price", pos.get("entry_price", 1.0))
     val = pos["qty"] * c_price
     total_val += val
-    p_pct = ((c_price - pos["entry_price"]) / pos["entry_price"]) * 100
-    prob = scout[ticker]["prob"] * 100 if ticker in scout else 50.0
+    entry_p = pos.get("entry_price", c_price)
+    p_pct = ((c_price - entry_p) / entry_p) * 100 if entry_p > 0 else 0.0
+    prob = scout.get(ticker, {}).get("prob", 0.5) * 100
     pos_report.append(f"🟢 **{ticker}**: LONG (${val:,.2f} | P&L: {p_pct:+.1f}% | Prob: {prob:.1f}%)")
 
 for ticker, data in scout.items():
     if ticker not in state["positions"] and ticker in [t for t, _ in ranked[:6]]:
-        pos_report.append(f"⚪ **{ticker}**: CASH (Prob: {data['prob']*100:.1f}% | ${data['price']:.2f})")
+        pos_report.append(f"⚪ **{ticker}**: CASH (Prob: {data.get('prob',0)*100:.1f}% | ${data.get('price',0):.2f})")
 
-pnl_tot = ((total_val - state["initial_balance"]) / state["initial_balance"]) * 100
+initial_bal = float(state.get("initial_balance", 10000.0))
+pnl_tot = ((total_val - initial_bal) / initial_bal) * 100
 
 with open(STATE_FILE, "w") as f:
     json.dump(state, f, indent=4)
 
-msg = f"🤖 **REPORT AGENTE SCOUT (18-20 ASSET)**\n\n"
+msg = f"🤖 **REPORT AGENTE SCOUT (18 ASSET)**\n\n"
 msg += "\n".join(pos_report) + "\n\n"
 if events:
     msg += "⚡ **EVENTI GIORNALIERI:**\n" + "\n".join(events) + "\n\n"
