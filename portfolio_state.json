@@ -1,29 +1,27 @@
 {
-    "initial_capital": 10000.0,
+    "cash": 0.0,
     "positions": {
-        "BTC-USD": {
-            "action": "CASH",
-            "entry_price": 0.0,
-            "allocated_capital": 2514.65983221834,
-            "current_value": 2514.65983221834
-        },
-        "NVDA": {
-            "action": "CASH",
-            "entry_price": 0.0,
-            "allocated_capital": 2517.969732953323,
-            "current_value": 2517.969732953323
-        },
-        "QQQ": {
-            "action": "LONG",
-            "entry_price": 706.3200073242188,
-            "allocated_capital": 2567.10436703111,
-            "current_value": 2567.10436703111
-        },
         "GLD": {
-            "action": "SHORT",
-            "entry_price": 426.69000244140625,
-            "allocated_capital": 2642.4449019404706,
-            "current_value": 2642.4449019404706
+            "qty": 5.896867728117255,
+            "entry_price": 423.9538879394531,
+            "peak_price": 423.9538879394531
+        },
+        "META": {
+            "qty": 4.435730851634333,
+            "entry_price": 563.60498046875,
+            "peak_price": 563.60498046875
+        },
+        "BTC-USD": {
+            "qty": 0.03159183974881328,
+            "entry_price": 79134.359375,
+            "peak_price": 79134.359375
+        },
+        "ETH-USD": {
+            "qty": 1.0105705282500845,
+            "entry_price": 2473.85009765625,
+            "peak_price": 2473.85009765625
         }
-    }
+    },
+    "initial_balance": 10000.0,
+    "initial_capital": 10000.0
 }
