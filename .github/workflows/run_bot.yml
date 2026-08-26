@@ -27,6 +27,9 @@ jobs:
           pip install yfinance xgboost lightgbm scikit-learn pandas joblib requests
 
       - name: 4. Addestra l'Ensemble ed Esegui l'Analisi
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python model_engine.py
           python main.py
