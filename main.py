@@ -1,9 +1,19 @@
 import json
 import os
+import sys
 import requests
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+# Se i Secrets sono vuoti o errati, il bot si ferma subito e mostra l'errore
+if not TELEGRAM_BOT_TOKEN:
+    print("❌ ERRORE CRITICO: La variabile TELEGRAM_BOT_TOKEN è vuota o non trovata nei Secrets di GitHub!")
+    sys.exit(1)
+
+if not TELEGRAM_CHAT_ID:
+    print("❌ ERRORE CRITICO: La variabile TELEGRAM_CHAT_ID è vuota o non trovata nei Secrets di GitHub!")
+    sys.exit(1)
 
 STATE_FILE = "portfolio_state.json"
 SCOUT_FILE = "scout_signals.json"
@@ -55,11 +65,11 @@ for ticker, pos in raw_positions.items():
     if curr_price <= trailing_stop_price and curr_price > entry_price:
         profit_pct = ((curr_price - entry_price) / entry_price) * 100
         current_cash += qty * curr_price
-        events.append(f"🎯 **TRAILING-STOP ({profit_pct:+.1f}%) su {ticker}** (${curr_price:.2f})")
+        events.append(f"🎯 TRAILING-STOP ({profit_pct:+.1f}%) su {ticker} (${curr_price:.2f})")
     elif curr_price <= stop_loss_price:
         loss_pct = ((curr_price - entry_price) / entry_price) * 100
         current_cash += qty * curr_price
-        events.append(f"🛡️ **STOP-LOSS ({loss_pct:+.1f}%) su {ticker}** (${curr_price:.2f})")
+        events.append(f"🛡️ STOP-LOSS ({loss_pct:+.1f}%) su {ticker} (${curr_price:.2f})")
     else:
         updated_positions[ticker] = {
             "qty": qty,
@@ -83,7 +93,7 @@ if top_candidates and state["cash"] > 500:
                     "peak_price": curr_price
                 }
                 state["cash"] -= alloc_per_asset
-                events.append(f"🚀 **ENTRATA SCOUT:** {ticker} a ${curr_price:.2f} (Prob: {scout[ticker].get('prob',0)*100:.1f}%)")
+                events.append(f"🚀 ENTRATA SCOUT: {ticker} a ${curr_price:.2f} (Prob: {scout[ticker].get('prob',0)*100:.1f}%)")
 
 total_val = state["cash"]
 pos_report = []
@@ -95,11 +105,11 @@ for ticker, pos in state["positions"].items():
     entry_p = pos.get("entry_price", c_price)
     p_pct = ((c_price - entry_p) / entry_p) * 100 if entry_p > 0 else 0.0
     prob = scout.get(ticker, {}).get("prob", 0.5) * 100
-    pos_report.append(f"🟢 **{ticker}**: LONG (${val:,.2f} | P&L: {p_pct:+.1f}% | Prob: {prob:.1f}%)")
+    pos_report.append(f"🟢 {ticker}: LONG (${val:,.2f} | P&L: {p_pct:+.1f}% | Prob: {prob:.1f}%)")
 
 for ticker, data in scout.items():
     if ticker not in state["positions"] and ticker in [t for t, _ in ranked[:6]]:
-        pos_report.append(f"⚪ **{ticker}**: CASH (Prob: {data.get('prob',0)*100:.1f}% | ${data.get('price',0):.2f})")
+        pos_report.append(f"⚪ {ticker}: CASH (Prob: {data.get('prob',0)*100:.1f}% | ${data.get('price',0):.2f})")
 
 initial_bal = float(state.get("initial_balance", 10000.0))
 pnl_tot = ((total_val - initial_bal) / initial_bal) * 100
@@ -107,13 +117,18 @@ pnl_tot = ((total_val - initial_bal) / initial_bal) * 100
 with open(STATE_FILE, "w") as f:
     json.dump(state, f, indent=4)
 
-msg = f"🤖 **REPORT AGENTE SCOUT (18 ASSET)**\n\n"
+msg = f"🤖 REPORT AGENTE SCOUT (18 ASSET)\n\n"
 msg += "\n".join(pos_report) + "\n\n"
 if events:
-    msg += "⚡ **EVENTI GIORNALIERI:**\n" + "\n".join(events) + "\n\n"
-msg += f"💼 **CAPITALE PORTAFOGLIO:**\n${total_val:,.2f}\n"
-msg += f"📈 **P&L Totale:** {pnl_tot:+.2f}%"
+    msg += "⚡ EVENTI GIORNALIERI:\n" + "\n".join(events) + "\n\n"
+msg += f"💼 CAPITALE PORTAFOGLIO:\n${total_val:,.2f}\n"
+msg += f"📈 P&L Totale: {pnl_tot:+.2f}%"
 
-if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "Markdown"})
+url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+res = requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": msg})
+
+if res.status_code != 200:
+    print(f"❌ ERRORE INVIO TELEGRAM (Codice {res.status_code}): {res.text}")
+    sys.exit(1)
+else:
+    print("✅ Messaggio Telegram inviato con successo!")
