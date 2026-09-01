@@ -6,13 +6,8 @@ import requests
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# Se i Secrets sono vuoti o errati, il bot si ferma subito e mostra l'errore
-if not TELEGRAM_BOT_TOKEN:
-    print("❌ ERRORE CRITICO: La variabile TELEGRAM_BOT_TOKEN è vuota o non trovata nei Secrets di GitHub!")
-    sys.exit(1)
-
-if not TELEGRAM_CHAT_ID:
-    print("❌ ERRORE CRITICO: La variabile TELEGRAM_CHAT_ID è vuota o non trovata nei Secrets di GitHub!")
+if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+    print("❌ ERRORE: Credenziali Telegram mancanti nei Secrets.")
     sys.exit(1)
 
 STATE_FILE = "portfolio_state.json"
@@ -22,11 +17,9 @@ state = {"cash": 10000.0, "positions": {}, "initial_balance": 10000.0}
 if os.path.exists(STATE_FILE):
     try:
         with open(STATE_FILE, "r") as f:
-            loaded_state = json.load(f)
-            if isinstance(loaded_state, dict):
-                state.update(loaded_state)
+            state.update(json.load(f))
     except Exception as e:
-        print(f"Errore lettura portfolio_state: {e}")
+        print(f"Errore lettura stato: {e}")
 
 scout = {}
 if os.path.exists(SCOUT_FILE):
@@ -34,20 +27,18 @@ if os.path.exists(SCOUT_FILE):
         with open(SCOUT_FILE, "r") as f:
             scout = json.load(f)
     except Exception as e:
-        print(f"Errore lettura scout_signals: {e}")
+        print(f"Errore lettura scout: {e}")
 
 ranked = sorted(scout.items(), key=lambda x: x[1].get('prob', 0), reverse=True)
 top_candidates = [ticker for ticker, data in ranked if data.get('prob', 0) > 0.55][:5]
 
 events = []
 updated_positions = {}
+stopped_today = set()
 current_cash = float(state.get("cash", 10000.0))
 
-raw_positions = state.get("positions", {})
-if not isinstance(raw_positions, dict):
-    raw_positions = {}
-
-for ticker, pos in raw_positions.items():
+# 1. GESTIONE POSIZIONI ESISTENTI
+for ticker, pos in state.get("positions", {}).items():
     if not isinstance(pos, dict):
         continue
         
@@ -55,6 +46,7 @@ for ticker, pos in raw_positions.items():
     entry_price = pos.get("entry_price", curr_price)
     peak_price = max(pos.get("peak_price", curr_price), curr_price)
     qty = pos.get("qty", 0.0)
+    prob = scout.get(ticker, {}).get("prob", 0.5)
     
     if qty <= 0:
         continue
@@ -62,14 +54,22 @@ for ticker, pos in raw_positions.items():
     trailing_stop_price = peak_price * 0.975
     stop_loss_price = entry_price * 0.98
     
+    # Condizione Uscita: Trailing-Stop, Stop-Loss o Crollo Probabilità ML (< 45%)
     if curr_price <= trailing_stop_price and curr_price > entry_price:
-        profit_pct = ((curr_price - entry_price) / entry_price) * 100
+        p_pct = ((curr_price - entry_price) / entry_price) * 100
         current_cash += qty * curr_price
-        events.append(f"🎯 TRAILING-STOP ({profit_pct:+.1f}%) su {ticker} (${curr_price:.2f})")
+        stopped_today.add(ticker)
+        events.append(f"🎯 TRAILING-STOP ({p_pct:+.1f}%) su {ticker} (${curr_price:.2f})")
     elif curr_price <= stop_loss_price:
-        loss_pct = ((curr_price - entry_price) / entry_price) * 100
+        p_pct = ((curr_price - entry_price) / entry_price) * 100
         current_cash += qty * curr_price
-        events.append(f"🛡️ STOP-LOSS ({loss_pct:+.1f}%) su {ticker} (${curr_price:.2f})")
+        stopped_today.add(ticker)
+        events.append(f"🛡️ STOP-LOSS ({p_pct:+.1f}%) su {ticker} (${curr_price:.2f})")
+    elif prob < 0.45:
+        p_pct = ((curr_price - entry_price) / entry_price) * 100
+        current_cash += qty * curr_price
+        stopped_today.add(ticker)
+        events.append(f"📉 SEGNALE ML DEBOLE ({prob*100:.1f}%) -> Uscita da {ticker} ({p_pct:+.1f}%)")
     else:
         updated_positions[ticker] = {
             "qty": qty,
@@ -80,9 +80,12 @@ for ticker, pos in raw_positions.items():
 state["cash"] = current_cash
 state["positions"] = updated_positions
 
-if top_candidates and state["cash"] > 500:
-    alloc_per_asset = state["cash"] / len(top_candidates)
-    for ticker in top_candidates:
+# 2. INGRESSI AGENTE SCOUT (Escludendo gli asset stoppati oggi)
+eligible_candidates = [t for t in top_candidates if t not in stopped_today]
+
+if eligible_candidates and state["cash"] > 500:
+    alloc_per_asset = state["cash"] / len(eligible_candidates)
+    for ticker in eligible_candidates:
         if ticker not in state["positions"] and ticker in scout:
             curr_price = scout[ticker].get("price", 0)
             if curr_price > 0:
@@ -95,6 +98,7 @@ if top_candidates and state["cash"] > 500:
                 state["cash"] -= alloc_per_asset
                 events.append(f"🚀 ENTRATA SCOUT: {ticker} a ${curr_price:.2f} (Prob: {scout[ticker].get('prob',0)*100:.1f}%)")
 
+# 3. REPORT FINALE
 total_val = state["cash"]
 pos_report = []
 
@@ -102,8 +106,7 @@ for ticker, pos in state["positions"].items():
     c_price = scout.get(ticker, {}).get("price", pos.get("entry_price", 1.0))
     val = pos["qty"] * c_price
     total_val += val
-    entry_p = pos.get("entry_price", c_price)
-    p_pct = ((c_price - entry_p) / entry_p) * 100 if entry_p > 0 else 0.0
+    p_pct = ((c_price - pos["entry_price"]) / pos["entry_price"]) * 100
     prob = scout.get(ticker, {}).get("prob", 0.5) * 100
     pos_report.append(f"🟢 {ticker}: LONG (${val:,.2f} | P&L: {p_pct:+.1f}% | Prob: {prob:.1f}%)")
 
@@ -125,10 +128,4 @@ msg += f"💼 CAPITALE PORTAFOGLIO:\n${total_val:,.2f}\n"
 msg += f"📈 P&L Totale: {pnl_tot:+.2f}%"
 
 url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-res = requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": msg})
-
-if res.status_code != 200:
-    print(f"❌ ERRORE INVIO TELEGRAM (Codice {res.status_code}): {res.text}")
-    sys.exit(1)
-else:
-    print("✅ Messaggio Telegram inviato con successo!")
+requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": msg})
