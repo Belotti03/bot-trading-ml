@@ -2,6 +2,8 @@ import json
 import os
 import sys
 import requests
+import yfinance as yf
+import pandas as pd
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
@@ -12,6 +14,24 @@ if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
 
 STATE_FILE = "portfolio_state.json"
 SCOUT_FILE = "scout_signals.json"
+
+def get_atr(ticker, period=14):
+    """Calcola l'ATR in dollari e in percentuale per un dato ticker."""
+    try:
+        df = yf.download(ticker, period="1mo", interval="1d", progress=False)
+        if df.empty or len(df) < period:
+            return None
+        high = df['High']
+        low = df['Low']
+        close = df['Close'].shift(1)
+        tr = pd.concat([high - low, (high - close).abs(), (low - close).abs()], axis=1).max(axis=1)
+        atr_val = tr.rolling(window=period).mean().iloc[-1]
+        if isinstance(atr_val, pd.Series):
+            atr_val = atr_val.item()
+        return float(atr_val)
+    except Exception as e:
+        print(f"Errore calcolo ATR per {ticker}: {e}")
+        return None
 
 state = {"cash": 10000.0, "positions": {}, "initial_balance": 10000.0}
 if os.path.exists(STATE_FILE):
@@ -37,7 +57,7 @@ updated_positions = {}
 stopped_today = set()
 current_cash = float(state.get("cash", 10000.0))
 
-# 1. GESTIONE POSIZIONI ESISTENTI
+# 1. GESTIONE POSIZIONI ESISTENTI (CON STOP DINAMICI ATR)
 for ticker, pos in state.get("positions", {}).items():
     if not isinstance(pos, dict):
         continue
@@ -51,20 +71,27 @@ for ticker, pos in state.get("positions", {}).items():
     if qty <= 0:
         continue
 
-    trailing_stop_price = peak_price * 0.975
-    stop_loss_price = entry_price * 0.98
-    
-    # Condizione Uscita: Trailing-Stop, Stop-Loss o Crollo Probabilità ML (< 45%)
+    # Calcolo ATR Dinamico (fallback al 2% se indisponibile)
+    atr = get_atr(ticker)
+    if atr and curr_price > 0:
+        sl_delta = atr * 2.0
+        ts_delta = atr * 2.5
+        stop_loss_price = entry_price - sl_delta
+        trailing_stop_price = peak_price - ts_delta
+    else:
+        stop_loss_price = entry_price * 0.98
+        trailing_stop_price = peak_price * 0.975
+
     if curr_price <= trailing_stop_price and curr_price > entry_price:
         p_pct = ((curr_price - entry_price) / entry_price) * 100
         current_cash += qty * curr_price
         stopped_today.add(ticker)
-        events.append(f"🎯 TRAILING-STOP ({p_pct:+.1f}%) su {ticker} (${curr_price:.2f})")
+        events.append(f"🎯 TRAILING-STOP ATR ({p_pct:+.1f}%) su {ticker} (${curr_price:.2f})")
     elif curr_price <= stop_loss_price:
         p_pct = ((curr_price - entry_price) / entry_price) * 100
         current_cash += qty * curr_price
         stopped_today.add(ticker)
-        events.append(f"🛡️ STOP-LOSS ({p_pct:+.1f}%) su {ticker} (${curr_price:.2f})")
+        events.append(f"🛡️ STOP-LOSS ATR ({p_pct:+.1f}%) su {ticker} (${curr_price:.2f})")
     elif prob < 0.45:
         p_pct = ((curr_price - entry_price) / entry_price) * 100
         current_cash += qty * curr_price
@@ -80,33 +107,15 @@ for ticker, pos in state.get("positions", {}).items():
 state["cash"] = current_cash
 state["positions"] = updated_positions
 
-# 2. INGRESSI AGENTE SCOUT (Escludendo gli asset stoppati oggi)
+# 2. INGRESSI AGENTE SCOUT (CON TETTO DEL 30% PER ASSET)
 eligible_candidates = [t for t in top_candidates if t not in stopped_today]
 
 if eligible_candidates and state["cash"] > 500:
-    alloc_per_asset = state["cash"] / len(eligible_candidates)
-    for ticker in eligible_candidates:
-        if ticker not in state["positions"] and ticker in scout:
-            curr_price = scout[ticker].get("price", 0)
-            if curr_price > 0:
-                qty = alloc_per_asset / curr_price
-                state["positions"][ticker] = {
-                    "qty": qty,
-                    "entry_price": curr_price,
-                    "peak_price": curr_price
-                }
-                state["cash"] -= alloc_per_asset
-                events.append(f"🚀 ENTRATA SCOUT: {ticker} a ${curr_price:.2f} (Prob: {scout[ticker].get('prob',0)*100:.1f}%)")
-# 2. INGRESSI AGENTE SCOUT (Escludendo gli asset stoppati oggi)
-eligible_candidates = [t for t in top_candidates if t not in stopped_today]
-
-if eligible_candidates and state["cash"] > 500:
-    # Calcolo valore totale per applicare il tetto del 30%
     total_portfolio_val = state["cash"] + sum(
         pos["qty"] * scout.get(t, {}).get("price", pos["entry_price"]) 
         for t, pos in state["positions"].items()
     )
-    max_per_asset = total_portfolio_val * 0.30  # Tetto massimo 30%
+    max_per_asset = total_portfolio_val * 0.30
     alloc_per_asset = min(state["cash"] / len(eligible_candidates), max_per_asset)
 
     for ticker in eligible_candidates:
@@ -121,6 +130,7 @@ if eligible_candidates and state["cash"] > 500:
                 }
                 state["cash"] -= alloc_per_asset
                 events.append(f"🚀 ENTRATA SCOUT: {ticker} a ${curr_price:.2f} (Prob: {scout[ticker].get('prob',0)*100:.1f}%)")
+
 # 3. REPORT FINALE
 total_val = state["cash"]
 pos_report = []
