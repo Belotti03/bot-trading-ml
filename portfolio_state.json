@@ -13,5 +13,7 @@
         }
     },
     "initial_balance": 10000.0,
+    "day_start_val": 10031.486400591379,
+    "last_run_date": "2026-09-04",
     "initial_capital": 10000.0
 }
