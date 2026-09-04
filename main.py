@@ -97,7 +97,30 @@ if eligible_candidates and state["cash"] > 500:
                 }
                 state["cash"] -= alloc_per_asset
                 events.append(f"🚀 ENTRATA SCOUT: {ticker} a ${curr_price:.2f} (Prob: {scout[ticker].get('prob',0)*100:.1f}%)")
+# 2. INGRESSI AGENTE SCOUT (Escludendo gli asset stoppati oggi)
+eligible_candidates = [t for t in top_candidates if t not in stopped_today]
 
+if eligible_candidates and state["cash"] > 500:
+    # Calcolo valore totale per applicare il tetto del 30%
+    total_portfolio_val = state["cash"] + sum(
+        pos["qty"] * scout.get(t, {}).get("price", pos["entry_price"]) 
+        for t, pos in state["positions"].items()
+    )
+    max_per_asset = total_portfolio_val * 0.30  # Tetto massimo 30%
+    alloc_per_asset = min(state["cash"] / len(eligible_candidates), max_per_asset)
+
+    for ticker in eligible_candidates:
+        if ticker not in state["positions"] and ticker in scout:
+            curr_price = scout[ticker].get("price", 0)
+            if curr_price > 0 and state["cash"] >= alloc_per_asset:
+                qty = alloc_per_asset / curr_price
+                state["positions"][ticker] = {
+                    "qty": qty,
+                    "entry_price": curr_price,
+                    "peak_price": curr_price
+                }
+                state["cash"] -= alloc_per_asset
+                events.append(f"🚀 ENTRATA SCOUT: {ticker} a ${curr_price:.2f} (Prob: {scout[ticker].get('prob',0)*100:.1f}%)")
 # 3. REPORT FINALE
 total_val = state["cash"]
 pos_report = []
