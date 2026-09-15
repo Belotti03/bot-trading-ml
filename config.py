@@ -23,5 +23,5 @@ API_SECRET = "IL_TUO_API_SECRET_TESTNET"
 USE_TESTNET = True
 # Credenziali Telegram (Per notifiche su Smartphone)
 # Lascia vuoto per ora: il bot simulerà l'invio della notifica a schermo
-TELEGRAM_BOT_TOKEN = "8662810792:AAEXSlBdnJU1jufIzRbb3veaouRqfhu8HEM"
-TELEGRAM_CHAT_ID = "6718946936"
+TELEGRAM_BOT_TOKEN = ""
+TELEGRAM_CHAT_ID = ""
