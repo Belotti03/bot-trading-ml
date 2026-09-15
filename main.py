@@ -92,7 +92,7 @@ updated_positions = {}
 stopped_today = set()
 current_cash = float(state.get("cash", 10000.0))
 
-# 1. GESTIONE POSIZIONI ESISTENTI (CON STOP DINAMICI ATR)
+# 1. GESTIONE POSIZIONI ESISTENTI (CON STOP DINAMICI ATR REATTIVI 2.0x)
 for ticker, pos in state.get("positions", {}).items():
     if not isinstance(pos, dict):
         continue
@@ -166,17 +166,24 @@ if circuit_breaker_active:
 if not macro_ok:
     events.append(f"🐻 MACRO FILTER ORSACCIONE: {macro_msg}. Ingressi congelati.")
 
-# 3. INGRESSI AGENTE SCOUT (CON TETTO 30% + FILTRI DI RISCHIO)
+# 3. INGRESSI AGENTE SCOUT (CON TETTO DINAMICO 30%/40% + FILTRI DI RISCHIO)
 eligible_candidates = [t for t in top_candidates if t not in stopped_today]
 
 if eligible_candidates and state["cash"] > 500 and macro_ok and not circuit_breaker_active:
-    max_per_asset = total_portfolio_val * 0.30
-    alloc_per_asset = min(state["cash"] / len(eligible_candidates), max_per_asset)
-
     for ticker in eligible_candidates:
         if ticker not in state["positions"] and ticker in scout:
             curr_price = scout[ticker].get("price", 0)
-            if curr_price > 0 and state["cash"] >= alloc_per_asset:
+            prob = scout[ticker].get("prob", 0.0)
+            
+            # Tetto Dinamico: 40% se probabilità >= 60%, altrimenti 30%
+            cap_pct = 0.40 if prob >= 0.60 else 0.30
+            max_per_asset = total_portfolio_val * cap_pct
+            
+            # Quota calcolata in base alla cassa residua e al Cap specifico del titolo
+            remaining_slots = len([t for t in eligible_candidates if t not in state["positions"]])
+            alloc_per_asset = min(state["cash"] / max(remaining_slots, 1), max_per_asset)
+
+            if curr_price > 0 and state["cash"] >= alloc_per_asset and alloc_per_asset > 100:
                 qty = alloc_per_asset / curr_price
                 state["positions"][ticker] = {
                     "qty": qty,
@@ -184,7 +191,7 @@ if eligible_candidates and state["cash"] > 500 and macro_ok and not circuit_brea
                     "peak_price": curr_price
                 }
                 state["cash"] -= alloc_per_asset
-                events.append(f"🚀 ENTRATA SCOUT: {ticker} a ${curr_price:.2f} (Prob: {scout[ticker].get('prob',0)*100:.1f}%)")
+                events.append(f"🚀 ENTRATA SCOUT: {ticker} a ${curr_price:.2f} (Prob: {prob*100:.1f}% | Cap: {int(cap_pct*100)}%)")
 
 # 4. REPORT FINALE
 pos_report = []
