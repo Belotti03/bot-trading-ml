@@ -4,14 +4,16 @@ import urllib.request
 import urllib.parse
 import urllib.error
 import json
+import os
 import config
+
 
 def send_telegram_alert(message):
     """Invia una notifica formattata in HTML a Telegram"""
     print("\n[MODULO NOTIFICHE TELEGRAM]")
     
-    token = config.TELEGRAM_BOT_TOKEN
-    chat_id = config.TELEGRAM_CHAT_ID
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID")
     
     # Se le chiavi Telegram non sono impostate o sono quelle di default
     if not token or token == "IL_TUO_TELEGRAM_BOT_TOKEN":
