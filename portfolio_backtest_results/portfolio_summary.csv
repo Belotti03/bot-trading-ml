@@ -1,0 +1,2 @@
+InitialCapital,FinalEquity,TotalReturn,MaxDrawdown,Sharpe,Trades,WinRate,ProfitFactor
+10000.0,0.0,-1.0,-1.0,0.0,246,0.491869918699187,0.990247366202889
