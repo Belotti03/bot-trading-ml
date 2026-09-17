@@ -1,0 +1,14 @@
+{
+    "initial_capital": 10000.0,
+    "fee_rate": 0.001,
+    "slippage_rate": 0.0005,
+    "long_threshold": 0.55,
+    "exit_threshold": 0.45,
+    "stop_atr_multiplier": 2.0,
+    "trailing_atr_multiplier": 2.5,
+    "assets_tested": 18,
+    "average_return": 0.045969101482715796,
+    "median_return": 0.06706630514997725,
+    "average_max_drawdown": -0.14958745015147223,
+    "average_sharpe": 0.2726422528288511
+}
