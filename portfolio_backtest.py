@@ -19,7 +19,7 @@ EXIT_THRESHOLD = 0.45
 MAX_POSITION_55 = 0.30
 MAX_POSITION_60 = 0.40
 
-MAX_NEW_POSITIONS_PER_DAY = 5
+MAX_NEW_POSITIONS_PER_SIGNAL_DATE = 5
 
 STOP_ATR_MULTIPLIER = 2.0
 TRAILING_ATR_MULTIPLIER = 2.5
@@ -55,7 +55,6 @@ ASSETS = [
     "GLD",
 ]
 
-
 MODEL_FEATURES = [
     "Return_1d",
     "Return_5d",
@@ -67,7 +66,7 @@ MODEL_FEATURES = [
 
 
 # ============================================================
-# DATA
+# DATA DOWNLOAD
 # ============================================================
 
 def download_data(ticker):
@@ -105,17 +104,18 @@ def download_data(ticker):
 
     df = df.replace(
         [np.inf, -np.inf],
-        np.nan
+        np.nan,
     )
 
     df.dropna(inplace=True)
 
-    # Normalize dates.
-    df.index = pd.to_datetime(
-        df.index
-    ).tz_localize(None)
+    if isinstance(df.index, pd.DatetimeIndex):
 
-    # Remove duplicate dates.
+        if df.index.tz is not None:
+            df.index = df.index.tz_localize(None)
+
+    df.index = pd.to_datetime(df.index)
+
     df = df[
         ~df.index.duplicated(
             keep="last"
@@ -142,11 +142,15 @@ def calculate_features(df):
     )
 
     data["SMA_10"] = (
-        data["Close"].rolling(10).mean()
+        data["Close"]
+        .rolling(10)
+        .mean()
     )
 
     data["SMA_50"] = (
-        data["Close"].rolling(50).mean()
+        data["Close"]
+        .rolling(50)
+        .mean()
     )
 
     data["SMA_ratio"] = (
@@ -159,14 +163,23 @@ def calculate_features(df):
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
 
-    avg_gain = gain.rolling(14).mean()
-    avg_loss = loss.rolling(14).mean()
+    avg_gain = (
+        gain
+        .rolling(14)
+        .mean()
+    )
+
+    avg_loss = (
+        loss
+        .rolling(14)
+        .mean()
+    )
 
     rs = (
         avg_gain
         / avg_loss.replace(
             0,
-            np.nan
+            np.nan,
         )
     )
 
@@ -178,8 +191,13 @@ def calculate_features(df):
         )
     )
 
+    # -------------------------
     # ATR
-    prev_close = data["Close"].shift(1)
+    # -------------------------
+
+    previous_close = (
+        data["Close"].shift(1)
+    )
 
     tr1 = (
         data["High"]
@@ -188,12 +206,12 @@ def calculate_features(df):
 
     tr2 = (
         data["High"]
-        - prev_close
+        - previous_close
     ).abs()
 
     tr3 = (
         data["Low"]
-        - prev_close
+        - previous_close
     ).abs()
 
     data["TR"] = pd.concat(
@@ -202,7 +220,7 @@ def calculate_features(df):
             tr2,
             tr3,
         ],
-        axis=1
+        axis=1,
     ).max(axis=1)
 
     data["ATR"] = (
@@ -211,17 +229,28 @@ def calculate_features(df):
         .mean()
     )
 
-    # Next-day direction.
-    data["Target"] = (
+    # -------------------------
+    # Target
+    # -------------------------
+
+    next_close = (
         data["Close"].shift(-1)
-        > data["Close"]
-    ).astype(float)
+    )
+
+    data["Target"] = np.where(
+        next_close.notna(),
+        (
+            next_close
+            > data["Close"]
+        ).astype(int),
+        np.nan,
+    )
 
     return data
 
 
 # ============================================================
-# MODEL
+# MODELS
 # ============================================================
 
 def train_models(train):
@@ -230,8 +259,13 @@ def train_models(train):
     from xgboost import XGBClassifier
     from lightgbm import LGBMClassifier
 
-    X = train[MODEL_FEATURES]
-    y = train["Target"].astype(int)
+    X = train[
+        MODEL_FEATURES
+    ]
+
+    y = train[
+        "Target"
+    ].astype(int)
 
     models = [
 
@@ -263,14 +297,17 @@ def train_models(train):
     ]
 
     for model in models:
-        model.fit(X, y)
+        model.fit(
+            X,
+            y,
+        )
 
     return models
 
 
 def predict_probability(
     models,
-    row
+    row,
 ):
 
     X = row[
@@ -282,7 +319,9 @@ def predict_probability(
     for model in models:
 
         probabilities.append(
-            model.predict_proba(X)[0, 1]
+            model.predict_proba(
+                X
+            )[0, 1]
         )
 
     return float(
@@ -291,7 +330,7 @@ def predict_probability(
 
 
 # ============================================================
-# OOS PREDICTIONS
+# WALK-FORWARD OOS
 # ============================================================
 
 def generate_oos_predictions(df):
@@ -300,7 +339,7 @@ def generate_oos_predictions(df):
 
     data = data.replace(
         [np.inf, -np.inf],
-        np.nan
+        np.nan,
     )
 
     data = data.dropna(
@@ -315,6 +354,9 @@ def generate_oos_predictions(df):
         ]
     ).copy()
 
+    if len(data) <= MIN_TRAIN_SIZE:
+        return pd.DataFrame()
+
     predictions = []
 
     test_start = MIN_TRAIN_SIZE
@@ -323,7 +365,7 @@ def generate_oos_predictions(df):
 
         test_end = min(
             test_start + STEP_SIZE,
-            len(data)
+            len(data),
         )
 
         train = data.iloc[
@@ -338,86 +380,253 @@ def generate_oos_predictions(df):
             train
         )
 
-        for idx, row in test.iterrows():
+        for index, row in test.iterrows():
 
             probability = (
                 predict_probability(
                     models,
-                    row
+                    row,
                 )
             )
 
             predictions.append({
 
-                "Date": idx,
+                "Date":
+                    pd.Timestamp(index),
 
-                "Open": float(
-                    row["Open"]
-                ),
+                "Open":
+                    float(row["Open"]),
 
-                "High": float(
-                    row["High"]
-                ),
+                "High":
+                    float(row["High"]),
 
-                "Low": float(
-                    row["Low"]
-                ),
+                "Low":
+                    float(row["Low"]),
 
-                "Close": float(
-                    row["Close"]
-                ),
+                "Close":
+                    float(row["Close"]),
 
-                "ATR": float(
-                    row["ATR"]
-                ),
+                "ATR":
+                    float(row["ATR"]),
 
-                "Probability": probability,
+                "Probability":
+                    probability,
             })
 
         test_start = test_end
 
-    return pd.DataFrame(
+    result = pd.DataFrame(
         predictions
     )
 
+    if result.empty:
+        return result
+
+    result = result.sort_values(
+        "Date"
+    ).reset_index(
+        drop=True
+    )
+
+    # Signal from previous bar.
+    result[
+        "PreviousProbability"
+    ] = result[
+        "Probability"
+    ].shift(1)
+
+    result[
+        "PreviousATR"
+    ] = result[
+        "ATR"
+    ].shift(1)
+
+    # IMPORTANT:
+    # each asset gets its OWN next available date.
+    result[
+        "NextAvailableDate"
+    ] = result[
+        "Date"
+    ].shift(-1)
+
+    return result
+
 
 # ============================================================
-# PORTFOLIO BACKTEST
+# PORTFOLIO VALUATION
 # ============================================================
 
-def run_portfolio_backtest(
-    all_predictions
+def mark_to_market(
+    cash,
+    positions,
+    last_prices,
 ):
 
-    # --------------------------------------------------------
-    # Build individual date sets.
-    # We DO NOT mix crypto weekends into the equity calendar.
-    # --------------------------------------------------------
+    equity = float(cash)
 
-    asset_dates = {}
+    for ticker, position in (
+        positions.items()
+    ):
 
-    for ticker, df in all_predictions.items():
-
-        asset_dates[ticker] = set(
-            pd.to_datetime(
-                df["Date"]
-            )
+        price = last_prices.get(
+            ticker
         )
 
-    # Use dates where at least one asset has data.
-    all_dates = sorted(
-        set().union(
-            *asset_dates.values()
+        if price is None:
+            continue
+
+        equity += (
+            position["shares"]
+            * price
+        )
+
+    return float(equity)
+
+
+# ============================================================
+# EXECUTE EXIT
+# ============================================================
+
+def close_position(
+    ticker,
+    position,
+    exit_date,
+    raw_exit_price,
+    reason,
+    cash,
+    trades,
+):
+
+    execution_price = (
+        raw_exit_price
+        * (
+            1
+            - SLIPPAGE_RATE
         )
     )
 
+    shares = position[
+        "shares"
+    ]
+
+    gross_value = (
+        shares
+        * execution_price
+    )
+
+    exit_fee = (
+        gross_value
+        * FEE_RATE
+    )
+
+    net_value = (
+        gross_value
+        - exit_fee
+    )
+
+    cash += net_value
+
+    pnl = (
+        net_value
+        - position["entry_cost"]
+    )
+
+    trade_return = (
+        pnl
+        / position["entry_cost"]
+    )
+
+    trades.append({
+
+        "Ticker":
+            ticker,
+
+        "EntryDate":
+            position["entry_date"],
+
+        "ExitDate":
+            exit_date,
+
+        "EntryPrice":
+            position["entry_price"],
+
+        "ExitPrice":
+            execution_price,
+
+        "Shares":
+            shares,
+
+        "EntryCost":
+            position["entry_cost"],
+
+        "PnL":
+            pnl,
+
+        "Return":
+            trade_return,
+
+        "Reason":
+            reason,
+    })
+
+    return cash
+
+
+# ============================================================
+# MAIN PORTFOLIO ENGINE
+# ============================================================
+
+def run_portfolio_backtest(
+    all_predictions,
+):
+
     # --------------------------------------------------------
-    # Fast lookup
+    # Create individual asset maps.
     # --------------------------------------------------------
 
-    prediction_map = {}
+    data_by_asset = {}
 
-    for ticker, df in all_predictions.items():
+    all_dates = set()
+
+    for ticker, df in (
+        all_predictions.items()
+    ):
+
+        clean = df.copy()
+
+        clean["Date"] = pd.to_datetime(
+            clean["Date"]
+        )
+
+        clean = clean.sort_values(
+            "Date"
+        ).reset_index(
+            drop=True
+        )
+
+        data_by_asset[
+            ticker
+        ] = clean
+
+        all_dates.update(
+            clean["Date"].tolist()
+        )
+
+    all_dates = sorted(
+        all_dates
+    )
+
+    # --------------------------------------------------------
+    # Direct lookup:
+    #
+    # (ticker, date) -> row
+    # --------------------------------------------------------
+
+    bar_map = {}
+
+    for ticker, df in (
+        data_by_asset.items()
+    ):
 
         for _, row in df.iterrows():
 
@@ -425,9 +634,103 @@ def run_portfolio_backtest(
                 row["Date"]
             )
 
-            prediction_map[
+            bar_map[
                 (ticker, date)
             ] = row
+
+    # --------------------------------------------------------
+    # Entry events:
+    #
+    # Every asset uses its own next available date.
+    # --------------------------------------------------------
+
+    entry_events = {}
+
+    for signal_date in all_dates:
+
+        candidates = []
+
+        for ticker, df in (
+            data_by_asset.items()
+        ):
+
+            rows = df[
+                df["Date"]
+                == signal_date
+            ]
+
+            if rows.empty:
+                continue
+
+            row = rows.iloc[0]
+
+            probability = float(
+                row["Probability"]
+            )
+
+            next_date = row[
+                "NextAvailableDate"
+            ]
+
+            if pd.isna(
+                next_date
+            ):
+                continue
+
+            if (
+                probability
+                < LONG_THRESHOLD
+            ):
+                continue
+
+            candidates.append({
+
+                "Ticker":
+                    ticker,
+
+                "Probability":
+                    probability,
+
+                "SignalDate":
+                    signal_date,
+
+                "ExecutionDate":
+                    pd.Timestamp(
+                        next_date
+                    ),
+
+                "ATR":
+                    float(row["ATR"]),
+            })
+
+        candidates.sort(
+            key=lambda x:
+                x["Probability"],
+            reverse=True,
+        )
+
+        candidates = candidates[
+            :MAX_NEW_POSITIONS_PER_SIGNAL_DATE
+        ]
+
+        for candidate in candidates:
+
+            execution_date = (
+                candidate[
+                    "ExecutionDate"
+                ]
+            )
+
+            entry_events.setdefault(
+                execution_date,
+                [],
+            ).append(
+                candidate
+            )
+
+    # --------------------------------------------------------
+    # Portfolio state.
+    # --------------------------------------------------------
 
     cash = INITIAL_CAPITAL
 
@@ -435,370 +738,191 @@ def run_portfolio_backtest(
 
     trades = []
 
+    last_prices = {}
+
     equity_curve = []
 
+    exited_today = set()
+
     # --------------------------------------------------------
-    # Process each global date.
+    # Process every REAL market date.
+    #
+    # No "next global date" is used.
     # --------------------------------------------------------
 
-    for i in range(
-        len(all_dates) - 1
-    ):
+    for current_date in all_dates:
 
-        signal_date = all_dates[i]
-        next_date = all_dates[i + 1]
+        current_date = pd.Timestamp(
+            current_date
+        )
+
+        exited_today = set()
 
         # ----------------------------------------------------
-        # 1. EXIT EXISTING POSITIONS
+        # Update last available market price.
+        # ----------------------------------------------------
+
+        todays_bars = []
+
+        for ticker, df in (
+            data_by_asset.items()
+        ):
+
+            row = bar_map.get(
+                (
+                    ticker,
+                    current_date
+                )
+            )
+
+            if row is None:
+                continue
+
+            todays_bars.append(
+                (
+                    ticker,
+                    row
+                )
+            )
+
+            last_prices[
+                ticker
+            ] = float(
+                row["Close"]
+            )
+
+        # ----------------------------------------------------
+        # 1. ML EXITS AT THE OPEN
+        #
+        # Uses the probability generated on the previous
+        # available bar for THAT asset.
         # ----------------------------------------------------
 
         for ticker in list(
             positions.keys()
         ):
 
-            position = positions[
-                ticker
-            ]
-
-            signal = prediction_map.get(
+            row = bar_map.get(
                 (
                     ticker,
-                    signal_date
+                    current_date
                 )
             )
 
-            next_bar = prediction_map.get(
-                (
-                    ticker,
-                    next_date
-                )
-            )
-
-            # Asset did not trade on this date.
-            if signal is None:
+            if row is None:
                 continue
 
-            # Asset has no next bar yet.
-            if next_bar is None:
-                continue
-
-            entry_price = (
-                position[
-                    "entry_price"
+            previous_probability = (
+                row[
+                    "PreviousProbability"
                 ]
             )
 
-            shares = position[
-                "shares"
-            ]
-
-            peak_price = position[
-                "peak_price"
-            ]
-
-            atr = float(
-                signal["ATR"]
-            )
-
-            probability = float(
-                signal[
-                    "Probability"
-                ]
-            )
-
-            next_open = float(
-                next_bar["Open"]
-            )
-
-            next_high = float(
-                next_bar["High"]
-            )
-
-            next_low = float(
-                next_bar["Low"]
-            )
-
-            # Update peak with actual intraday high.
-            peak_price = max(
-                peak_price,
-                next_high
-            )
-
-            position[
-                "peak_price"
-            ] = peak_price
-
-            stop_price = (
-                entry_price
-                - STOP_ATR_MULTIPLIER
-                * atr
-            )
-
-            trailing_price = (
-                peak_price
-                - TRAILING_ATR_MULTIPLIER
-                * atr
-            )
-
-            exit_price = None
-            exit_reason = None
-
-            # ------------------------------------------------
-            # STOP
-            # ------------------------------------------------
-
-            if next_low <= stop_price:
-
-                exit_price = min(
-                    next_open,
-                    stop_price
-                )
-
-                exit_reason = (
-                    "STOP"
-                )
-
-            # ------------------------------------------------
-            # TRAILING STOP
-            # ------------------------------------------------
-
-            elif (
-                next_low
-                <= trailing_price
+            if pd.isna(
+                previous_probability
             ):
+                continue
 
-                exit_price = min(
-                    next_open,
-                    trailing_price
+            if (
+                float(
+                    previous_probability
                 )
-
-                exit_reason = (
-                    "TRAILING_STOP"
-                )
-
-            # ------------------------------------------------
-            # ML EXIT
-            # ------------------------------------------------
-
-            elif (
-                probability
                 < EXIT_THRESHOLD
             ):
 
-                exit_price = next_open
+                position = positions[
+                    ticker
+                ]
 
-                exit_reason = (
-                    "ML_EXIT"
+                cash = close_position(
+                    ticker=ticker,
+                    position=position,
+                    exit_date=current_date,
+                    raw_exit_price=float(
+                        row["Open"]
+                    ),
+                    reason="ML_EXIT",
+                    cash=cash,
+                    trades=trades,
                 )
-
-            # ------------------------------------------------
-            # Execute exit
-            # ------------------------------------------------
-
-            if exit_price is not None:
-
-                execution_price = (
-                    exit_price
-                    * (
-                        1
-                        - SLIPPAGE_RATE
-                    )
-                )
-
-                gross_value = (
-                    shares
-                    * execution_price
-                )
-
-                fee = (
-                    gross_value
-                    * FEE_RATE
-                )
-
-                cash += (
-                    gross_value
-                    - fee
-                )
-
-                pnl = (
-                    execution_price
-                    - entry_price
-                ) * shares
-
-                trades.append({
-
-                    "Ticker": ticker,
-
-                    "EntryDate":
-                        position[
-                            "entry_date"
-                        ],
-
-                    "ExitDate":
-                        next_date,
-
-                    "EntryPrice":
-                        entry_price,
-
-                    "ExitPrice":
-                        execution_price,
-
-                    "Shares":
-                        shares,
-
-                    "PnL":
-                        pnl,
-
-                    "Return":
-                        (
-                            execution_price
-                            / entry_price
-                        ) - 1,
-
-                    "Reason":
-                        exit_reason,
-                })
 
                 del positions[
                     ticker
                 ]
 
+                exited_today.add(
+                    ticker
+                )
+
         # ----------------------------------------------------
-        # 2. ENTER NEW POSITIONS
+        # 2. ENTRY AT THE OPEN
+        #
+        # Entries use only the asset's own next available bar.
         # ----------------------------------------------------
 
-        candidates = []
+        todays_entries = (
+            entry_events.get(
+                current_date,
+                [],
+            )
+        )
 
-        for ticker in ASSETS:
+        todays_entries = sorted(
+            todays_entries,
+            key=lambda x:
+                x["Probability"],
+            reverse=True,
+        )
+
+        entries_executed = 0
+
+        for event in todays_entries:
+
+            if (
+                entries_executed
+                >= MAX_NEW_POSITIONS_PER_SIGNAL_DATE
+            ):
+                break
+
+            ticker = event[
+                "Ticker"
+            ]
+
+            # Never re-enter an asset on the same day
+            # after it has already been exited.
+            if ticker in exited_today:
+                continue
 
             if ticker in positions:
                 continue
 
-            signal = prediction_map.get(
+            row = bar_map.get(
                 (
                     ticker,
-                    signal_date
+                    current_date
                 )
             )
 
-            next_bar = prediction_map.get(
-                (
-                    ticker,
-                    next_date
-                )
-            )
-
-            if (
-                signal is None
-                or next_bar is None
-            ):
+            if row is None:
                 continue
 
+            # ------------------------------------------------
+            # Current equity BEFORE entry.
+            # ------------------------------------------------
+
+            portfolio_equity = (
+                mark_to_market(
+                    cash,
+                    positions,
+                    last_prices,
+                )
+            )
+
             probability = float(
-                signal[
+                event[
                     "Probability"
                 ]
             )
-
-            if (
-                probability
-                >= LONG_THRESHOLD
-            ):
-
-                candidates.append({
-
-                    "Ticker":
-                        ticker,
-
-                    "Probability":
-                        probability,
-
-                    "NextBar":
-                        next_bar,
-                })
-
-        candidates.sort(
-            key=lambda x:
-                x["Probability"],
-            reverse=True
-        )
-
-        candidates = candidates[
-            :MAX_NEW_POSITIONS_PER_DAY
-        ]
-
-        # ----------------------------------------------------
-        # Current portfolio equity
-        # ----------------------------------------------------
-
-        portfolio_equity = cash
-
-        for ticker, position in (
-            positions.items()
-        ):
-
-            current_bar = prediction_map.get(
-                (
-                    ticker,
-                    signal_date
-                )
-            )
-
-            if current_bar is not None:
-
-                portfolio_equity += (
-                    position["shares"]
-                    * float(
-                        current_bar["Close"]
-                    )
-                )
-
-        # ----------------------------------------------------
-        # Enter candidates
-        # ----------------------------------------------------
-
-        for candidate in candidates:
-
-            ticker = candidate[
-                "Ticker"
-            ]
-
-            probability = candidate[
-                "Probability"
-            ]
-
-            next_bar = candidate[
-                "NextBar"
-            ]
-
-            # Recalculate equity before
-            # every new position.
-            portfolio_equity = cash
-
-            for (
-                existing_ticker,
-                position
-            ) in positions.items():
-
-                current_bar = (
-                    prediction_map.get(
-                        (
-                            existing_ticker,
-                            signal_date
-                        )
-                    )
-                )
-
-                if current_bar is not None:
-
-                    portfolio_equity += (
-                        position["shares"]
-                        * float(
-                            current_bar[
-                                "Close"
-                            ]
-                        )
-                    )
 
             if (
                 probability
@@ -822,45 +946,47 @@ def run_portfolio_backtest(
 
             allocation = min(
                 target_value,
-                cash
+                cash,
             )
 
             if allocation <= 0:
                 continue
 
-            open_price = float(
-                next_bar["Open"]
+            raw_open = float(
+                row["Open"]
             )
 
             execution_price = (
-                open_price
+                raw_open
                 * (
                     1
                     + SLIPPAGE_RATE
                 )
             )
 
-            fee = (
+            entry_fee = (
                 allocation
                 * FEE_RATE
             )
 
-            position_value = (
+            net_position_value = (
                 allocation
-                - fee
+                - entry_fee
             )
 
             shares = (
-                position_value
+                net_position_value
                 / execution_price
             )
 
             cash -= allocation
 
-            positions[ticker] = {
+            positions[
+                ticker
+            ] = {
 
                 "entry_date":
-                    next_date,
+                    current_date,
 
                 "entry_price":
                     execution_price,
@@ -868,50 +994,200 @@ def run_portfolio_backtest(
                 "shares":
                     shares,
 
+                "entry_cost":
+                    allocation,
+
+                "entry_atr":
+                    float(
+                        event["ATR"]
+                    ),
+
                 "peak_price":
                     float(
-                        next_bar["High"]
+                        row["High"]
                     ),
             }
 
+            entries_executed += 1
+
         # ----------------------------------------------------
-        # 3. END-OF-DAY EQUITY
+        # 3. INTRADAY STOP / TRAILING STOP
+        #
+        # Uses ATR from the PREVIOUS available bar.
+        # Therefore current-day high/low is not used to
+        # calculate today's ATR.
         # ----------------------------------------------------
 
-        end_equity = cash
-
-        for ticker, position in (
-            positions.items()
+        for ticker in list(
+            positions.keys()
         ):
 
-            current_bar = prediction_map.get(
+            row = bar_map.get(
                 (
                     ticker,
-                    signal_date
+                    current_date
                 )
             )
 
-            if current_bar is not None:
+            if row is None:
+                continue
 
-                end_equity += (
-                    position["shares"]
-                    * float(
-                        current_bar["Close"]
-                    )
+            position = positions[
+                ticker
+            ]
+
+            entry_price = float(
+                position[
+                    "entry_price"
+                ]
+            )
+
+            peak_before_bar = float(
+                position[
+                    "peak_price"
+                ]
+            )
+
+            previous_atr = row[
+                "PreviousATR"
+            ]
+
+            if pd.isna(
+                previous_atr
+            ):
+
+                atr = float(
+                    position[
+                        "entry_atr"
+                    ]
                 )
+
+            else:
+
+                atr = float(
+                    previous_atr
+                )
+
+            fixed_stop = (
+                entry_price
+                - (
+                    STOP_ATR_MULTIPLIER
+                    * atr
+                )
+            )
+
+            trailing_stop = (
+                peak_before_bar
+                - (
+                    TRAILING_ATR_MULTIPLIER
+                    * atr
+                )
+            )
+
+            effective_stop = max(
+                fixed_stop,
+                trailing_stop,
+            )
+
+            current_open = float(
+                row["Open"]
+            )
+
+            current_low = float(
+                row["Low"]
+            )
+
+            exit_price = None
+            reason = None
+
+            # Gap through stop.
+            if (
+                current_open
+                <= effective_stop
+            ):
+
+                exit_price = (
+                    current_open
+                )
+
+                reason = (
+                    "STOP_GAP"
+                )
+
+            # Intraday stop.
+            elif (
+                current_low
+                <= effective_stop
+            ):
+
+                exit_price = (
+                    effective_stop
+                )
+
+                reason = (
+                    "ATR_STOP"
+                )
+
+            if exit_price is not None:
+
+                cash = close_position(
+                    ticker=ticker,
+                    position=position,
+                    exit_date=current_date,
+                    raw_exit_price=exit_price,
+                    reason=reason,
+                    cash=cash,
+                    trades=trades,
+                )
+
+                del positions[
+                    ticker
+                ]
+
+                exited_today.add(
+                    ticker
+                )
+
+                continue
+
+            # Update peak ONLY after the position survived
+            # today's risk check.
+            current_high = float(
+                row["High"]
+            )
+
+            position[
+                "peak_price"
+            ] = max(
+                peak_before_bar,
+                current_high,
+            )
+
+        # ----------------------------------------------------
+        # 4. END-OF-DAY MARK-TO-MARKET
+        #
+        # Every position uses its own latest available close.
+        # Missing market dates NEVER create a zero price.
+        # ----------------------------------------------------
+
+        equity = mark_to_market(
+            cash,
+            positions,
+            last_prices,
+        )
 
         equity_curve.append({
 
             "Date":
-                signal_date,
+                current_date,
 
             "Equity":
-                end_equity,
+                equity,
 
             "Cash":
                 cash,
 
-            "Positions":
+            "OpenPositions":
                 len(positions),
         })
 
@@ -919,127 +1195,79 @@ def run_portfolio_backtest(
     # FINAL LIQUIDATION
     # ========================================================
 
+    for ticker in list(
+        positions.keys()
+    ):
+
+        position = positions[
+            ticker
+        ]
+
+        df = data_by_asset[
+            ticker
+        ]
+
+        if df.empty:
+            continue
+
+        last_row = df.iloc[-1]
+
+        final_date = pd.Timestamp(
+            last_row["Date"]
+        )
+
+        final_close = float(
+            last_row["Close"]
+        )
+
+        cash = close_position(
+            ticker=ticker,
+            position=position,
+            exit_date=final_date,
+            raw_exit_price=final_close,
+            reason="END_OF_TEST",
+            cash=cash,
+            trades=trades,
+        )
+
+        del positions[
+            ticker
+        ]
+
+    # --------------------------------------------------------
+    # FINAL EQUITY
+    # --------------------------------------------------------
+
+    final_equity = float(
+        cash
+    )
+
+    # --------------------------------------------------------
+    # SAFETY INVARIANTS
+    # --------------------------------------------------------
+
+    if final_equity < 0:
+
+        raise RuntimeError(
+            "FATAL: final equity is negative."
+        )
+
+    if not np.isfinite(
+        final_equity
+    ):
+
+        raise RuntimeError(
+            "FATAL: final equity is not finite."
+        )
+
     if positions:
 
-        final_dates = {}
-
-        for ticker in positions:
-
-            ticker_dates = sorted(
-                asset_dates[
-                    ticker
-                ]
-            )
-
-            if ticker_dates:
-                final_dates[ticker] = (
-                    ticker_dates[-1]
-                )
-
-        for ticker in list(
-            positions.keys()
-        ):
-
-            position = positions[
-                ticker
-            ]
-
-            last_date = final_dates.get(
-                ticker
-            )
-
-            if last_date is None:
-                continue
-
-            last_bar = prediction_map.get(
-                (
-                    ticker,
-                    last_date
-                )
-            )
-
-            if last_bar is None:
-                continue
-
-            exit_price = (
-                float(
-                    last_bar["Close"]
-                )
-                * (
-                    1
-                    - SLIPPAGE_RATE
-                )
-            )
-
-            gross_value = (
-                position["shares"]
-                * exit_price
-            )
-
-            fee = (
-                gross_value
-                * FEE_RATE
-            )
-
-            cash += (
-                gross_value
-                - fee
-            )
-
-            pnl = (
-                exit_price
-                - position[
-                    "entry_price"
-                ]
-            ) * position["shares"]
-
-            trades.append({
-
-                "Ticker":
-                    ticker,
-
-                "EntryDate":
-                    position[
-                        "entry_date"
-                    ],
-
-                "ExitDate":
-                    last_date,
-
-                "EntryPrice":
-                    position[
-                        "entry_price"
-                    ],
-
-                "ExitPrice":
-                    exit_price,
-
-                "Shares":
-                    position[
-                        "shares"
-                    ],
-
-                "PnL":
-                    pnl,
-
-                "Return":
-                    (
-                        exit_price
-                        / position[
-                            "entry_price"
-                        ]
-                    ) - 1,
-
-                "Reason":
-                    "END_OF_TEST",
-            })
-
-            del positions[
-                ticker
-            ]
+        raise RuntimeError(
+            "FATAL: positions remain after final liquidation."
+        )
 
     # ========================================================
-    # RESULTS
+    # METRICS
     # ========================================================
 
     equity_df = pd.DataFrame(
@@ -1050,47 +1278,51 @@ def run_portfolio_backtest(
         trades
     )
 
-    # Final equity MUST be cash after
-    # all positions have been liquidated.
-    final_equity = float(
-        cash
-    )
+    if equity_df.empty:
 
-    total_return = (
-        final_equity
-        / INITIAL_CAPITAL
-    ) - 1
+        max_drawdown = 0.0
+        sharpe = 0.0
 
-    if not equity_df.empty:
+    else:
+
+        equity_series = (
+            equity_df["Equity"]
+        )
 
         running_max = (
-            equity_df["Equity"]
+            equity_series
             .cummax()
         )
 
-        drawdown = (
-            equity_df["Equity"]
+        drawdowns = (
+            equity_series
             / running_max
         ) - 1
 
         max_drawdown = float(
-            drawdown.min()
+            drawdowns.min()
         )
 
-        daily_returns = (
-            equity_df["Equity"]
+        returns = (
+            equity_series
             .pct_change()
+            .replace(
+                [np.inf, -np.inf],
+                np.nan,
+            )
             .dropna()
         )
 
         if (
-            len(daily_returns) > 1
-            and daily_returns.std() > 0
+            len(returns) > 1
+            and returns.std() > 0
         ):
 
-            sharpe = (
-                daily_returns.mean()
-                / daily_returns.std()
+            sharpe = float(
+                (
+                    returns.mean()
+                    / returns.std()
+                )
                 * math.sqrt(252)
             )
 
@@ -1098,10 +1330,14 @@ def run_portfolio_backtest(
 
             sharpe = 0.0
 
-    else:
+    total_return = (
+        final_equity
+        / INITIAL_CAPITAL
+    ) - 1
 
-        max_drawdown = 0.0
-        sharpe = 0.0
+    # --------------------------------------------------------
+    # Trade statistics
+    # --------------------------------------------------------
 
     trades_count = len(
         trades_df
@@ -1110,7 +1346,8 @@ def run_portfolio_backtest(
     if trades_count > 0:
 
         wins = (
-            trades_df["PnL"] > 0
+            trades_df["PnL"]
+            > 0
         ).sum()
 
         win_rate = (
@@ -1121,14 +1358,14 @@ def run_portfolio_backtest(
         gross_profit = (
             trades_df.loc[
                 trades_df["PnL"] > 0,
-                "PnL"
+                "PnL",
             ].sum()
         )
 
         gross_loss = abs(
             trades_df.loc[
                 trades_df["PnL"] < 0,
-                "PnL"
+                "PnL",
             ].sum()
         )
 
@@ -1141,16 +1378,14 @@ def run_portfolio_backtest(
 
         else:
 
-            profit_factor = float(
-                "inf"
-            )
+            profit_factor = np.inf
 
     else:
 
         win_rate = 0.0
         profit_factor = 0.0
 
-    result = {
+    summary = {
 
         "InitialCapital":
             INITIAL_CAPITAL,
@@ -1178,9 +1413,9 @@ def run_portfolio_backtest(
     }
 
     return (
-        result,
+        summary,
         equity_df,
-        trades_df
+        trades_df,
     )
 
 
@@ -1200,17 +1435,21 @@ def main():
 
     all_predictions = {}
 
+    print()
     print(
-        "\n========================================"
+        "=================================================="
     )
+    print(
+        "GENERATING WALK-FORWARD OOS PREDICTIONS"
+    )
+    print(
+        "=================================================="
+    )
+    print()
 
-    print(
-        "GENERATING WALK-FORWARD PREDICTIONS"
-    )
-
-    print(
-        "========================================\n"
-    )
+    # --------------------------------------------------------
+    # Generate OOS predictions for every asset.
+    # --------------------------------------------------------
 
     for ticker in ASSETS:
 
@@ -1223,7 +1462,7 @@ def main():
             if df.empty:
 
                 print(
-                    f"{ticker}: no data"
+                    f"{ticker}: NO DATA"
                 )
 
                 continue
@@ -1237,7 +1476,7 @@ def main():
             if predictions.empty:
 
                 print(
-                    f"{ticker}: no OOS predictions"
+                    f"{ticker}: NO OOS DATA"
                 )
 
                 continue
@@ -1254,63 +1493,44 @@ def main():
 
             print(
                 f"{ticker}: "
-                f"{len(predictions)} OOS signals"
+                f"{len(predictions)} OOS rows"
             )
 
-        except Exception as e:
+        except Exception as error:
 
             print(
-                f"ERROR {ticker}: {e}"
+                f"{ticker}: ERROR -> "
+                f"{error}"
             )
 
     if not all_predictions:
 
         raise RuntimeError(
-            "No predictions generated."
+            "No OOS predictions generated."
         )
 
+    print()
     print(
-        "\n========================================"
+        "=================================================="
     )
-
     print(
-        "RUNNING SINGLE PORTFOLIO BACKTEST"
+        "RUNNING EVENT-DRIVEN PORTFOLIO BACKTEST"
     )
-
     print(
-        "========================================\n"
+        "=================================================="
     )
+    print()
 
     (
-        result,
+        summary,
         equity_df,
-        trades_df
+        trades_df,
     ) = run_portfolio_backtest(
         all_predictions
     )
 
     # --------------------------------------------------------
-    # SAFETY CHECK
-    # --------------------------------------------------------
-
-    if not np.isfinite(
-        result["FinalEquity"]
-    ):
-
-        raise RuntimeError(
-            "Final equity is not finite."
-        )
-
-    if (
-        result["FinalEquity"] < 0
-    ):
-
-        raise RuntimeError(
-            "Final equity is negative."
-        )
-
-    # --------------------------------------------------------
-    # SAVE
+    # Save results.
     # --------------------------------------------------------
 
     equity_df.to_csv(
@@ -1326,7 +1546,7 @@ def main():
     )
 
     pd.DataFrame(
-        [result]
+        [summary]
     ).to_csv(
         output_dir
         / "portfolio_summary.csv",
@@ -1334,59 +1554,66 @@ def main():
     )
 
     # --------------------------------------------------------
-    # PRINT
+    # Print results.
     # --------------------------------------------------------
 
+    print()
     print(
-        "\n========================================"
+        "=================================================="
     )
-
     print(
-        "PORTFOLIO BACKTEST COMPLETED"
+        "PORTFOLIO OOS BACKTEST COMPLETED"
     )
-
     print(
-        "========================================"
+        "=================================================="
     )
 
     print(
         f"Initial capital : "
-        f"€{result['InitialCapital']:,.2f}"
+        f"€{summary['InitialCapital']:,.2f}"
     )
 
     print(
         f"Final equity    : "
-        f"€{result['FinalEquity']:,.2f}"
+        f"€{summary['FinalEquity']:,.2f}"
     )
 
     print(
         f"Total return    : "
-        f"{result['TotalReturn']:.2%}"
+        f"{summary['TotalReturn']:.2%}"
     )
 
     print(
         f"Max drawdown    : "
-        f"{result['MaxDrawdown']:.2%}"
+        f"{summary['MaxDrawdown']:.2%}"
     )
 
     print(
         f"Sharpe          : "
-        f"{result['Sharpe']:.2f}"
+        f"{summary['Sharpe']:.2f}"
     )
 
     print(
         f"Trades          : "
-        f"{result['Trades']}"
+        f"{summary['Trades']}"
     )
 
     print(
         f"Win rate        : "
-        f"{result['WinRate']:.2%}"
+        f"{summary['WinRate']:.2%}"
     )
 
     print(
         f"Profit factor   : "
-        f"{result['ProfitFactor']:.2f}"
+        f"{summary['ProfitFactor']:.3f}"
+    )
+
+    print()
+    print(
+        "Results saved in:"
+    )
+    print(
+        "portfolio_backtest_results/"
     )
 
 
