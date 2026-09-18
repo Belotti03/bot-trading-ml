@@ -191,9 +191,9 @@ def calculate_features(df):
         )
     )
 
-    # -------------------------
+    # --------------------------------------------------------
     # ATR
-    # -------------------------
+    # --------------------------------------------------------
 
     previous_close = (
         data["Close"].shift(1)
@@ -229,9 +229,9 @@ def calculate_features(df):
         .mean()
     )
 
-    # -------------------------
+    # --------------------------------------------------------
     # Target
-    # -------------------------
+    # --------------------------------------------------------
 
     next_close = (
         data["Close"].shift(-1)
@@ -297,6 +297,7 @@ def train_models(train):
     ]
 
     for model in models:
+
         model.fit(
             X,
             y,
@@ -428,7 +429,10 @@ def generate_oos_predictions(df):
         drop=True
     )
 
-    # Signal from previous bar.
+    # --------------------------------------------------------
+    # Signal from previous available bar.
+    # --------------------------------------------------------
+
     result[
         "PreviousProbability"
     ] = result[
@@ -441,8 +445,10 @@ def generate_oos_predictions(df):
         "ATR"
     ].shift(1)
 
-    # IMPORTANT:
-    # each asset gets its OWN next available date.
+    # --------------------------------------------------------
+    # Each asset uses its OWN next available date.
+    # --------------------------------------------------------
+
     result[
         "NextAvailableDate"
     ] = result[
@@ -484,7 +490,7 @@ def mark_to_market(
 
 
 # ============================================================
-# EXECUTE EXIT
+# CLOSE POSITION
 # ============================================================
 
 def close_position(
@@ -573,7 +579,7 @@ def close_position(
 
 
 # ============================================================
-# MAIN PORTFOLIO ENGINE
+# PORTFOLIO ENGINE
 # ============================================================
 
 def run_portfolio_backtest(
@@ -581,7 +587,7 @@ def run_portfolio_backtest(
 ):
 
     # --------------------------------------------------------
-    # Create individual asset maps.
+    # Prepare asset data.
     # --------------------------------------------------------
 
     data_by_asset = {}
@@ -616,10 +622,14 @@ def run_portfolio_backtest(
         all_dates
     )
 
+    if not all_dates:
+
+        raise RuntimeError(
+            "No dates available for portfolio backtest."
+        )
+
     # --------------------------------------------------------
-    # Direct lookup:
-    #
-    # (ticker, date) -> row
+    # Direct bar lookup.
     # --------------------------------------------------------
 
     bar_map = {}
@@ -639,9 +649,10 @@ def run_portfolio_backtest(
             ] = row
 
     # --------------------------------------------------------
-    # Entry events:
+    # Entry events.
     #
-    # Every asset uses its own next available date.
+    # Signal is generated on one bar.
+    # Entry occurs on the asset's next available bar.
     # --------------------------------------------------------
 
     entry_events = {}
@@ -745,9 +756,43 @@ def run_portfolio_backtest(
     exited_today = set()
 
     # --------------------------------------------------------
-    # Process every REAL market date.
+    # Initial equity point.
     #
-    # No "next global date" is used.
+    # This is explicitly recorded so the backtest starts
+    # from €10,000 rather than from an already invested state.
+    # --------------------------------------------------------
+
+    first_date = pd.Timestamp(
+        all_dates[0]
+    )
+
+    initial_record_date = (
+        first_date
+        - pd.Timedelta(
+            seconds=1
+        )
+    )
+
+    equity_curve.append({
+
+        "Date":
+            initial_record_date,
+
+        "Equity":
+            INITIAL_CAPITAL,
+
+        "Cash":
+            INITIAL_CAPITAL,
+
+        "OpenPositions":
+            0,
+
+        "Phase":
+            "INITIAL",
+    })
+
+    # --------------------------------------------------------
+    # Process every real market date.
     # --------------------------------------------------------
 
     for current_date in all_dates:
@@ -759,14 +804,10 @@ def run_portfolio_backtest(
         exited_today = set()
 
         # ----------------------------------------------------
-        # Update last available market price.
+        # Update latest available prices.
         # ----------------------------------------------------
 
-        todays_bars = []
-
-        for ticker, df in (
-            data_by_asset.items()
-        ):
+        for ticker in data_by_asset:
 
             row = bar_map.get(
                 (
@@ -778,13 +819,6 @@ def run_portfolio_backtest(
             if row is None:
                 continue
 
-            todays_bars.append(
-                (
-                    ticker,
-                    row
-                )
-            )
-
             last_prices[
                 ticker
             ] = float(
@@ -792,10 +826,9 @@ def run_portfolio_backtest(
             )
 
         # ----------------------------------------------------
-        # 1. ML EXITS AT THE OPEN
+        # 1. ML EXITS AT OPEN
         #
-        # Uses the probability generated on the previous
-        # available bar for THAT asset.
+        # Uses previous available probability for that asset.
         # ----------------------------------------------------
 
         for ticker in list(
@@ -855,9 +888,7 @@ def run_portfolio_backtest(
                 )
 
         # ----------------------------------------------------
-        # 2. ENTRY AT THE OPEN
-        #
-        # Entries use only the asset's own next available bar.
+        # 2. ENTRIES AT OPEN
         # ----------------------------------------------------
 
         todays_entries = (
@@ -888,8 +919,6 @@ def run_portfolio_backtest(
                 "Ticker"
             ]
 
-            # Never re-enter an asset on the same day
-            # after it has already been exited.
             if ticker in exited_today:
                 continue
 
@@ -907,7 +936,7 @@ def run_portfolio_backtest(
                 continue
 
             # ------------------------------------------------
-            # Current equity BEFORE entry.
+            # Equity before entry.
             # ------------------------------------------------
 
             portfolio_equity = (
@@ -981,6 +1010,15 @@ def run_portfolio_backtest(
 
             cash -= allocation
 
+            # ------------------------------------------------
+            # IMPORTANT:
+            #
+            # Peak starts at entry price.
+            #
+            # We DO NOT use today's High because it was not
+            # known when the position was opened.
+            # ------------------------------------------------
+
             positions[
                 ticker
             ] = {
@@ -1003,19 +1041,15 @@ def run_portfolio_backtest(
                     ),
 
                 "peak_price":
-                    float(
-                        row["High"]
-                    ),
+                    execution_price,
             }
 
             entries_executed += 1
 
         # ----------------------------------------------------
-        # 3. INTRADAY STOP / TRAILING STOP
+        # 3. INTRADAY STOPS
         #
-        # Uses ATR from the PREVIOUS available bar.
-        # Therefore current-day high/low is not used to
-        # calculate today's ATR.
+        # ATR comes from previous available bar.
         # ----------------------------------------------------
 
         for ticker in list(
@@ -1100,7 +1134,10 @@ def run_portfolio_backtest(
             exit_price = None
             reason = None
 
+            # ------------------------------------------------
             # Gap through stop.
+            # ------------------------------------------------
+
             if (
                 current_open
                 <= effective_stop
@@ -1114,7 +1151,10 @@ def run_portfolio_backtest(
                     "STOP_GAP"
                 )
 
+            # ------------------------------------------------
             # Intraday stop.
+            # ------------------------------------------------
+
             elif (
                 current_low
                 <= effective_stop
@@ -1150,8 +1190,14 @@ def run_portfolio_backtest(
 
                 continue
 
-            # Update peak ONLY after the position survived
-            # today's risk check.
+            # ------------------------------------------------
+            # Update peak only AFTER the risk check.
+            #
+            # Today's High is allowed here because the position
+            # survived the stop check and we are now updating
+            # the state for the NEXT bar.
+            # ------------------------------------------------
+
             current_high = float(
                 row["High"]
             )
@@ -1164,10 +1210,7 @@ def run_portfolio_backtest(
             )
 
         # ----------------------------------------------------
-        # 4. END-OF-DAY MARK-TO-MARKET
-        #
-        # Every position uses its own latest available close.
-        # Missing market dates NEVER create a zero price.
+        # 4. END-OF-DAY MARK TO MARKET
         # ----------------------------------------------------
 
         equity = mark_to_market(
@@ -1189,11 +1232,18 @@ def run_portfolio_backtest(
 
             "OpenPositions":
                 len(positions),
+
+            "Phase":
+                "EOD",
         })
 
     # ========================================================
     # FINAL LIQUIDATION
     # ========================================================
+
+    final_test_date = pd.Timestamp(
+        all_dates[-1]
+    )
 
     for ticker in list(
         positions.keys()
@@ -1235,7 +1285,7 @@ def run_portfolio_backtest(
         ]
 
     # --------------------------------------------------------
-    # FINAL EQUITY
+    # Final equity AFTER liquidation.
     # --------------------------------------------------------
 
     final_equity = float(
@@ -1243,8 +1293,36 @@ def run_portfolio_backtest(
     )
 
     # --------------------------------------------------------
-    # SAFETY INVARIANTS
+    # Replace the final EOD equity point with the actual
+    # post-liquidation final equity.
+    #
+    # This guarantees that the equity curve and FinalEquity
+    # describe the same portfolio state.
     # --------------------------------------------------------
+
+    if equity_curve:
+
+        equity_curve[-1] = {
+
+            "Date":
+                final_test_date,
+
+            "Equity":
+                final_equity,
+
+            "Cash":
+                final_equity,
+
+            "OpenPositions":
+                0,
+
+            "Phase":
+                "FINAL_LIQUIDATED",
+        }
+
+    # ========================================================
+    # SAFETY INVARIANTS
+    # ========================================================
 
     if final_equity < 0:
 
@@ -1267,7 +1345,7 @@ def run_portfolio_backtest(
         )
 
     # ========================================================
-    # METRICS
+    # DATAFRAMES
     # ========================================================
 
     equity_df = pd.DataFrame(
@@ -1278,6 +1356,20 @@ def run_portfolio_backtest(
         trades
     )
 
+    equity_df["Date"] = pd.to_datetime(
+        equity_df["Date"]
+    )
+
+    equity_df = equity_df.sort_values(
+        "Date"
+    ).reset_index(
+        drop=True
+    )
+
+    # ========================================================
+    # METRICS
+    # ========================================================
+
     if equity_df.empty:
 
         max_drawdown = 0.0
@@ -1285,26 +1377,63 @@ def run_portfolio_backtest(
 
     else:
 
-        equity_series = (
-            equity_df["Equity"]
+        # ----------------------------------------------------
+        # EOD equity only.
+        # ----------------------------------------------------
+
+        eod_equity = (
+            equity_df.loc[
+                equity_df["Phase"].isin(
+                    [
+                        "EOD",
+                        "FINAL_LIQUIDATED",
+                    ]
+                ),
+                "Equity",
+            ]
+            .astype(float)
+            .reset_index(drop=True)
+        )
+
+        # ----------------------------------------------------
+        # Include the initial €10,000 explicitly in drawdown.
+        # ----------------------------------------------------
+
+        drawdown_series = pd.concat(
+            [
+                pd.Series(
+                    [INITIAL_CAPITAL]
+                ),
+                eod_equity,
+            ],
+            ignore_index=True,
         )
 
         running_max = (
-            equity_series
+            drawdown_series
             .cummax()
         )
 
         drawdowns = (
-            equity_series
+            drawdown_series
             / running_max
-        ) - 1
+        ) - 1.0
 
         max_drawdown = float(
             drawdowns.min()
         )
 
+        # ----------------------------------------------------
+        # Sharpe:
+        # only actual EOD-to-EOD returns.
+        #
+        # The initial capital point is NOT treated as a daily
+        # return because it is a starting state, not a market
+        # observation.
+        # ----------------------------------------------------
+
         returns = (
-            equity_series
+            eod_equity
             .pct_change()
             .replace(
                 [np.inf, -np.inf],
@@ -1315,13 +1444,13 @@ def run_portfolio_backtest(
 
         if (
             len(returns) > 1
-            and returns.std() > 0
+            and returns.std(ddof=1) > 0
         ):
 
             sharpe = float(
                 (
                     returns.mean()
-                    / returns.std()
+                    / returns.std(ddof=1)
                 )
                 * math.sqrt(252)
             )
@@ -1330,14 +1459,18 @@ def run_portfolio_backtest(
 
             sharpe = 0.0
 
+    # --------------------------------------------------------
+    # Total return.
+    # --------------------------------------------------------
+
     total_return = (
         final_equity
         / INITIAL_CAPITAL
-    ) - 1
+    ) - 1.0
 
-    # --------------------------------------------------------
-    # Trade statistics
-    # --------------------------------------------------------
+    # ========================================================
+    # TRADE STATISTICS
+    # ========================================================
 
     trades_count = len(
         trades_df
@@ -1384,6 +1517,28 @@ def run_portfolio_backtest(
 
         win_rate = 0.0
         profit_factor = 0.0
+
+    # ========================================================
+    # FINAL CONSISTENCY CHECK
+    # ========================================================
+
+    if not np.isclose(
+        final_equity,
+        float(
+            equity_df.iloc[-1]["Equity"]
+        ),
+        rtol=1e-10,
+        atol=1e-8,
+    ):
+
+        raise RuntimeError(
+            "FATAL: FinalEquity does not match "
+            "the final equity curve value."
+        )
+
+    # ========================================================
+    # SUMMARY
+    # ========================================================
 
     summary = {
 
