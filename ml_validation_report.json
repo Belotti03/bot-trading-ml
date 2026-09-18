@@ -20,8 +20,8 @@
         "positive_rate": 0.5271084337349398,
         "predicted_positive_rate": 0.3855421686746988,
         "accuracy": 0.48493975903614456,
-        "brier_score": 0.271163543856375,
-        "log_loss": 0.7403275166960277
+        "brier_score": 0.2711589002569056,
+        "log_loss": 0.7403155494271002
     },
     "AMD": {
         "samples": 332,
@@ -49,19 +49,19 @@
     },
     "TSM": {
         "samples": 332,
-        "positive_rate": 0.536144578313253,
+        "positive_rate": 0.5391566265060241,
         "predicted_positive_rate": 0.536144578313253,
-        "accuracy": 0.46987951807228917,
-        "brier_score": 0.27440373877801,
-        "log_loss": 0.7470355393850467
+        "accuracy": 0.47289156626506024,
+        "brier_score": 0.27308965809040064,
+        "log_loss": 0.7442185479135118
     },
     "PLTR": {
         "samples": 332,
-        "positive_rate": 0.5271084337349398,
+        "positive_rate": 0.5301204819277109,
         "predicted_positive_rate": 0.6807228915662651,
-        "accuracy": 0.49698795180722893,
-        "brier_score": 0.2692796656510453,
-        "log_loss": 0.7363997925700592
+        "accuracy": 0.4939759036144578,
+        "brier_score": 0.26931817828800775,
+        "log_loss": 0.7364768220419342
     },
     "ARM": {
         "samples": 332,
@@ -106,10 +106,10 @@
     "GOOGL": {
         "samples": 332,
         "positive_rate": 0.5210843373493976,
-        "predicted_positive_rate": 0.48493975903614456,
-        "accuracy": 0.46987951807228917,
-        "brier_score": 0.2797951802291858,
-        "log_loss": 0.7593108847097048
+        "predicted_positive_rate": 0.46987951807228917,
+        "accuracy": 0.46686746987951805,
+        "brier_score": 0.2807420197144826,
+        "log_loss": 0.761554294972605
     },
     "AAPL": {
         "samples": 332,
@@ -129,11 +129,11 @@
     },
     "QQQ": {
         "samples": 332,
-        "positive_rate": 0.5572289156626506,
+        "positive_rate": 0.5602409638554217,
         "predicted_positive_rate": 0.5180722891566265,
-        "accuracy": 0.5210843373493976,
-        "brier_score": 0.26881160378889773,
-        "log_loss": 0.7381427121197519
+        "accuracy": 0.5240963855421686,
+        "brier_score": 0.2684496655893514,
+        "log_loss": 0.7374159567353039
     },
     "GLD": {
         "samples": 332,
