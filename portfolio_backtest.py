@@ -1044,27 +1044,45 @@ def run_portfolio_backtest(
                 "peak_price":
                     execution_price,
             }
-                        # ------------------------------------------------
-            # DEBUG: cash consistency check
-            # ------------------------------------------------
+                       # DEBUG: true cash/ledger consistency check
+invested_cost = sum(
+    float(p["entry_cost"])
+    for p in positions.values()
+)
 
-            invested_cost = sum(
-                float(p["entry_cost"])
-                for p in positions.values()
-            )
+realized_pnl = sum(
+    float(t["PnL"])
+    for t in trades
+)
 
-            if (
-                cash < -0.01
-                or invested_cost > INITIAL_CAPITAL + 0.01
-            ):
-                raise RuntimeError(
-                    f"CASH CONSISTENCY ERROR | "
-                    f"date={current_date} | "
-                    f"cash={cash:.2f} | "
-                    f"invested_cost={invested_cost:.2f} | "
-                    f"positions={list(positions.keys())}"
-                )
+ledger_value = (
+    cash
+    + invested_cost
+    - realized_pnl
+)
 
+if cash < -0.01:
+    raise RuntimeError(
+        f"CASH CONSISTENCY ERROR | "
+        f"date={current_date} | "
+        f"cash={cash:.2f} | "
+        f"invested_cost={invested_cost:.2f} | "
+        f"realized_pnl={realized_pnl:.2f} | "
+        f"ledger_value={ledger_value:.2f} | "
+        f"positions={list(positions.keys())}"
+    )
+
+if abs(ledger_value - INITIAL_CAPITAL) > 0.05:
+    raise RuntimeError(
+        f"LEDGER CONSISTENCY ERROR | "
+        f"date={current_date} | "
+        f"cash={cash:.2f} | "
+        f"invested_cost={invested_cost:.2f} | "
+        f"realized_pnl={realized_pnl:.2f} | "
+        f"ledger_value={ledger_value:.2f} | "
+        f"expected={INITIAL_CAPITAL:.2f} | "
+        f"positions={list(positions.keys())}"
+    )
             entries_executed += 1
 
         # ----------------------------------------------------
