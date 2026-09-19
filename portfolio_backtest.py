@@ -1083,7 +1083,7 @@ if abs(ledger_value - INITIAL_CAPITAL) > 0.05:
         f"expected={INITIAL_CAPITAL:.2f} | "
         f"positions={list(positions.keys())}"
     )
-            entries_executed += 1
+        entries_executed += 1
 
         # ----------------------------------------------------
         # 3. INTRADAY STOPS
