@@ -1009,6 +1009,7 @@ def run_portfolio_backtest(
             )
 
             cash -= allocation
+            
 
             # ------------------------------------------------
             # IMPORTANT:
@@ -1043,6 +1044,26 @@ def run_portfolio_backtest(
                 "peak_price":
                     execution_price,
             }
+                        # ------------------------------------------------
+            # DEBUG: cash consistency check
+            # ------------------------------------------------
+
+            invested_cost = sum(
+                float(p["entry_cost"])
+                for p in positions.values()
+            )
+
+            if (
+                cash < -0.01
+                or invested_cost > INITIAL_CAPITAL + 0.01
+            ):
+                raise RuntimeError(
+                    f"CASH CONSISTENCY ERROR | "
+                    f"date={current_date} | "
+                    f"cash={cash:.2f} | "
+                    f"invested_cost={invested_cost:.2f} | "
+                    f"positions={list(positions.keys())}"
+                )
 
             entries_executed += 1
 
