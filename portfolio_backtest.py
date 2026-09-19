@@ -18,7 +18,6 @@ EXIT_THRESHOLD = 0.45
 
 MAX_POSITION_55 = 0.30
 MAX_POSITION_60 = 0.40
-
 MAX_NEW_POSITIONS_PER_SIGNAL_DATE = 5
 
 STOP_ATR_MULTIPLIER = 2.0
@@ -70,7 +69,6 @@ MODEL_FEATURES = [
 # ============================================================
 
 def download_data(ticker):
-
     print(f"Downloading {ticker}...")
 
     df = yf.download(
@@ -87,17 +85,9 @@ def download_data(ticker):
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
 
-    required = [
-        "Open",
-        "High",
-        "Low",
-        "Close",
-    ]
+    required = ["Open", "High", "Low", "Close"]
 
-    if not all(
-        column in df.columns
-        for column in required
-    ):
+    if not all(column in df.columns for column in required):
         return pd.DataFrame()
 
     df = df[required].copy()
@@ -110,16 +100,13 @@ def download_data(ticker):
     df.dropna(inplace=True)
 
     if isinstance(df.index, pd.DatetimeIndex):
-
         if df.index.tz is not None:
             df.index = df.index.tz_localize(None)
 
     df.index = pd.to_datetime(df.index)
 
     df = df[
-        ~df.index.duplicated(
-            keep="last"
-        )
+        ~df.index.duplicated(keep="last")
     ]
 
     return df
@@ -130,7 +117,6 @@ def download_data(ticker):
 # ============================================================
 
 def calculate_features(df):
-
     data = df.copy()
 
     data["Return_1d"] = (
@@ -230,7 +216,8 @@ def calculate_features(df):
     )
 
     # --------------------------------------------------------
-    # Target
+    # Target: next day's close is higher than today's close.
+    # The final row has no target and is removed later.
     # --------------------------------------------------------
 
     next_close = (
@@ -254,7 +241,6 @@ def calculate_features(df):
 # ============================================================
 
 def train_models(train):
-
     from sklearn.ensemble import RandomForestClassifier
     from xgboost import XGBClassifier
     from lightgbm import LGBMClassifier
@@ -268,7 +254,6 @@ def train_models(train):
     ].astype(int)
 
     models = [
-
         XGBClassifier(
             n_estimators=200,
             max_depth=3,
@@ -278,7 +263,6 @@ def train_models(train):
             eval_metric="logloss",
             random_state=42,
         ),
-
         LGBMClassifier(
             n_estimators=200,
             max_depth=3,
@@ -286,7 +270,6 @@ def train_models(train):
             verbosity=-1,
             random_state=42,
         ),
-
         RandomForestClassifier(
             n_estimators=300,
             max_depth=6,
@@ -297,20 +280,12 @@ def train_models(train):
     ]
 
     for model in models:
-
-        model.fit(
-            X,
-            y,
-        )
+        model.fit(X, y)
 
     return models
 
 
-def predict_probability(
-    models,
-    row,
-):
-
+def predict_probability(models, row):
     X = row[
         MODEL_FEATURES
     ].to_frame().T
@@ -318,11 +293,8 @@ def predict_probability(
     probabilities = []
 
     for model in models:
-
         probabilities.append(
-            model.predict_proba(
-                X
-            )[0, 1]
+            model.predict_proba(X)[0, 1]
         )
 
     return float(
@@ -335,7 +307,6 @@ def predict_probability(
 # ============================================================
 
 def generate_oos_predictions(df):
-
     data = calculate_features(df)
 
     data = data.replace(
@@ -363,7 +334,6 @@ def generate_oos_predictions(df):
     test_start = MIN_TRAIN_SIZE
 
     while test_start < len(data):
-
         test_end = min(
             test_start + STEP_SIZE,
             len(data),
@@ -377,42 +347,25 @@ def generate_oos_predictions(df):
             test_start:test_end
         ]
 
-        models = train_models(
-            train
-        )
+        models = train_models(train)
 
         for index, row in test.iterrows():
-
-            probability = (
-                predict_probability(
-                    models,
-                    row,
-                )
+            probability = predict_probability(
+                models,
+                row,
             )
 
-            predictions.append({
-
-                "Date":
-                    pd.Timestamp(index),
-
-                "Open":
-                    float(row["Open"]),
-
-                "High":
-                    float(row["High"]),
-
-                "Low":
-                    float(row["Low"]),
-
-                "Close":
-                    float(row["Close"]),
-
-                "ATR":
-                    float(row["ATR"]),
-
-                "Probability":
-                    probability,
-            })
+            predictions.append(
+                {
+                    "Date": pd.Timestamp(index),
+                    "Open": float(row["Open"]),
+                    "High": float(row["High"]),
+                    "Low": float(row["Low"]),
+                    "Close": float(row["Close"]),
+                    "ATR": float(row["ATR"]),
+                    "Probability": probability,
+                }
+            )
 
         test_start = test_end
 
@@ -423,37 +376,32 @@ def generate_oos_predictions(df):
     if result.empty:
         return result
 
-    result = result.sort_values(
-        "Date"
-    ).reset_index(
-        drop=True
+    result = (
+        result
+        .sort_values("Date")
+        .reset_index(drop=True)
     )
 
     # --------------------------------------------------------
-    # Signal from previous available bar.
+    # Signals used by the portfolio engine refer to the
+    # previous available bar.
     # --------------------------------------------------------
 
-    result[
-        "PreviousProbability"
-    ] = result[
-        "Probability"
-    ].shift(1)
+    result["PreviousProbability"] = (
+        result["Probability"].shift(1)
+    )
 
-    result[
-        "PreviousATR"
-    ] = result[
-        "ATR"
-    ].shift(1)
+    result["PreviousATR"] = (
+        result["ATR"].shift(1)
+    )
 
     # --------------------------------------------------------
-    # Each asset uses its OWN next available date.
+    # Each asset uses its own next available trading date.
     # --------------------------------------------------------
 
-    result[
-        "NextAvailableDate"
-    ] = result[
-        "Date"
-    ].shift(-1)
+    result["NextAvailableDate"] = (
+        result["Date"].shift(-1)
+    )
 
     return result
 
@@ -467,16 +415,10 @@ def mark_to_market(
     positions,
     last_prices,
 ):
-
     equity = float(cash)
 
-    for ticker, position in (
-        positions.items()
-    ):
-
-        price = last_prices.get(
-            ticker
-        )
+    for ticker, position in positions.items():
+        price = last_prices.get(ticker)
 
         if price is None:
             continue
@@ -502,18 +444,12 @@ def close_position(
     cash,
     trades,
 ):
-
     execution_price = (
         raw_exit_price
-        * (
-            1
-            - SLIPPAGE_RATE
-        )
+        * (1 - SLIPPAGE_RATE)
     )
 
-    shares = position[
-        "shares"
-    ]
+    shares = position["shares"]
 
     gross_value = (
         shares
@@ -542,88 +478,113 @@ def close_position(
         / position["entry_cost"]
     )
 
-    trades.append({
-
-        "Ticker":
-            ticker,
-
-        "EntryDate":
-            position["entry_date"],
-
-        "ExitDate":
-            exit_date,
-
-        "EntryPrice":
-            position["entry_price"],
-
-        "ExitPrice":
-            execution_price,
-
-        "Shares":
-            shares,
-
-        "EntryCost":
-            position["entry_cost"],
-
-        "PnL":
-            pnl,
-
-        "Return":
-            trade_return,
-
-        "Reason":
-            reason,
-    })
+    trades.append(
+        {
+            "Ticker": ticker,
+            "EntryDate": position["entry_date"],
+            "ExitDate": exit_date,
+            "EntryPrice": position["entry_price"],
+            "ExitPrice": execution_price,
+            "Shares": shares,
+            "EntryCost": position["entry_cost"],
+            "PnL": pnl,
+            "Return": trade_return,
+            "Reason": reason,
+        }
+    )
 
     return cash
+
+
+# ============================================================
+# LEDGER CHECK
+# ============================================================
+
+def check_cash_ledger(
+    cash,
+    positions,
+    trades,
+    current_date,
+):
+    invested_cost = sum(
+        float(position["entry_cost"])
+        for position in positions.values()
+    )
+
+    realized_pnl = sum(
+        float(trade["PnL"])
+        for trade in trades
+    )
+
+    ledger_value = (
+        cash
+        + invested_cost
+        - realized_pnl
+    )
+
+    if cash < -0.01:
+        raise RuntimeError(
+            "CASH CONSISTENCY ERROR | "
+            f"date={current_date} | "
+            f"cash={cash:.2f} | "
+            f"invested_cost={invested_cost:.2f} | "
+            f"realized_pnl={realized_pnl:.2f} | "
+            f"ledger_value={ledger_value:.2f} | "
+            f"positions={list(positions.keys())}"
+        )
+
+    if not np.isclose(
+        ledger_value,
+        INITIAL_CAPITAL,
+        rtol=0.0,
+        atol=0.05,
+    ):
+        raise RuntimeError(
+            "LEDGER CONSISTENCY ERROR | "
+            f"date={current_date} | "
+            f"cash={cash:.2f} | "
+            f"invested_cost={invested_cost:.2f} | "
+            f"realized_pnl={realized_pnl:.2f} | "
+            f"ledger_value={ledger_value:.2f} | "
+            f"expected={INITIAL_CAPITAL:.2f} | "
+            f"positions={list(positions.keys())}"
+        )
 
 
 # ============================================================
 # PORTFOLIO ENGINE
 # ============================================================
 
-def run_portfolio_backtest(
-    all_predictions,
-):
-
+def run_portfolio_backtest(all_predictions):
     # --------------------------------------------------------
     # Prepare asset data.
     # --------------------------------------------------------
 
     data_by_asset = {}
-
     all_dates = set()
 
-    for ticker, df in (
-        all_predictions.items()
-    ):
-
+    for ticker, df in all_predictions.items():
         clean = df.copy()
 
         clean["Date"] = pd.to_datetime(
             clean["Date"]
         )
 
-        clean = clean.sort_values(
-            "Date"
-        ).reset_index(
-            drop=True
+        clean = (
+            clean
+            .sort_values("Date")
+            .reset_index(drop=True)
         )
 
-        data_by_asset[
-            ticker
-        ] = clean
+        data_by_asset[ticker] = clean
 
         all_dates.update(
             clean["Date"].tolist()
         )
 
-    all_dates = sorted(
-        all_dates
-    )
+    all_dates = sorted(all_dates)
 
     if not all_dates:
-
         raise RuntimeError(
             "No dates available for portfolio backtest."
         )
@@ -634,12 +595,8 @@ def run_portfolio_backtest(
 
     bar_map = {}
 
-    for ticker, df in (
-        data_by_asset.items()
-    ):
-
+    for ticker, df in data_by_asset.items():
         for _, row in df.iterrows():
-
             date = pd.Timestamp(
                 row["Date"]
             )
@@ -653,21 +610,18 @@ def run_portfolio_backtest(
     #
     # Signal is generated on one bar.
     # Entry occurs on the asset's next available bar.
+    # Candidates are ranked by probability on each signal
+    # date, with a maximum of five new signals.
     # --------------------------------------------------------
 
     entry_events = {}
 
     for signal_date in all_dates:
-
         candidates = []
 
-        for ticker, df in (
-            data_by_asset.items()
-        ):
-
+        for ticker, df in data_by_asset.items():
             rows = df[
-                df["Date"]
-                == signal_date
+                df["Date"] == signal_date
             ]
 
             if rows.empty:
@@ -683,40 +637,26 @@ def run_portfolio_backtest(
                 "NextAvailableDate"
             ]
 
-            if pd.isna(
-                next_date
-            ):
+            if pd.isna(next_date):
                 continue
 
-            if (
-                probability
-                < LONG_THRESHOLD
-            ):
+            if probability < LONG_THRESHOLD:
                 continue
 
-            candidates.append({
-
-                "Ticker":
-                    ticker,
-
-                "Probability":
-                    probability,
-
-                "SignalDate":
-                    signal_date,
-
-                "ExecutionDate":
-                    pd.Timestamp(
+            candidates.append(
+                {
+                    "Ticker": ticker,
+                    "Probability": probability,
+                    "SignalDate": signal_date,
+                    "ExecutionDate": pd.Timestamp(
                         next_date
                     ),
-
-                "ATR":
-                    float(row["ATR"]),
-            })
+                    "ATR": float(row["ATR"]),
+                }
+            )
 
         candidates.sort(
-            key=lambda x:
-                x["Probability"],
+            key=lambda item: item["Probability"],
             reverse=True,
         )
 
@@ -725,41 +665,27 @@ def run_portfolio_backtest(
         ]
 
         for candidate in candidates:
-
-            execution_date = (
-                candidate[
-                    "ExecutionDate"
-                ]
-            )
+            execution_date = candidate[
+                "ExecutionDate"
+            ]
 
             entry_events.setdefault(
                 execution_date,
                 [],
-            ).append(
-                candidate
-            )
+            ).append(candidate)
 
     # --------------------------------------------------------
     # Portfolio state.
     # --------------------------------------------------------
 
     cash = INITIAL_CAPITAL
-
     positions = {}
-
     trades = []
-
     last_prices = {}
-
     equity_curve = []
 
-    exited_today = set()
-
     # --------------------------------------------------------
-    # Initial equity point.
-    #
-    # This is explicitly recorded so the backtest starts
-    # from €10,000 rather than from an already invested state.
+    # Explicit initial equity point.
     # --------------------------------------------------------
 
     first_date = pd.Timestamp(
@@ -768,35 +694,24 @@ def run_portfolio_backtest(
 
     initial_record_date = (
         first_date
-        - pd.Timedelta(
-            seconds=1
-        )
+        - pd.Timedelta(seconds=1)
     )
 
-    equity_curve.append({
-
-        "Date":
-            initial_record_date,
-
-        "Equity":
-            INITIAL_CAPITAL,
-
-        "Cash":
-            INITIAL_CAPITAL,
-
-        "OpenPositions":
-            0,
-
-        "Phase":
-            "INITIAL",
-    })
+    equity_curve.append(
+        {
+            "Date": initial_record_date,
+            "Equity": INITIAL_CAPITAL,
+            "Cash": INITIAL_CAPITAL,
+            "OpenPositions": 0,
+            "Phase": "INITIAL",
+        }
+    )
 
     # --------------------------------------------------------
-    # Process every real market date.
+    # Main event-driven loop.
     # --------------------------------------------------------
 
     for current_date in all_dates:
-
         current_date = pd.Timestamp(
             current_date
         )
@@ -804,68 +719,46 @@ def run_portfolio_backtest(
         exited_today = set()
 
         # ----------------------------------------------------
-        # Update latest available prices.
+        # Update latest available prices before valuation.
         # ----------------------------------------------------
 
         for ticker in data_by_asset:
-
             row = bar_map.get(
-                (
-                    ticker,
-                    current_date
+                (ticker, current_date)
+            )
+
+            if row is not None:
+                last_prices[ticker] = float(
+                    row["Close"]
                 )
-            )
-
-            if row is None:
-                continue
-
-            last_prices[
-                ticker
-            ] = float(
-                row["Close"]
-            )
 
         # ----------------------------------------------------
         # 1. ML EXITS AT OPEN
         #
-        # Uses previous available probability for that asset.
+        # Use the previous available probability, so today's
+        # close is never used to decide today's open exit.
         # ----------------------------------------------------
 
-        for ticker in list(
-            positions.keys()
-        ):
-
+        for ticker in list(positions.keys()):
             row = bar_map.get(
-                (
-                    ticker,
-                    current_date
-                )
+                (ticker, current_date)
             )
 
             if row is None:
                 continue
 
             previous_probability = (
-                row[
-                    "PreviousProbability"
-                ]
+                row["PreviousProbability"]
             )
 
-            if pd.isna(
-                previous_probability
-            ):
+            if pd.isna(previous_probability):
                 continue
 
             if (
-                float(
-                    previous_probability
-                )
+                float(previous_probability)
                 < EXIT_THRESHOLD
             ):
-
-                position = positions[
-                    ticker
-                ]
+                position = positions[ticker]
 
                 cash = close_position(
                     ticker=ticker,
@@ -879,45 +772,41 @@ def run_portfolio_backtest(
                     trades=trades,
                 )
 
-                del positions[
-                    ticker
-                ]
+                del positions[ticker]
+                exited_today.add(ticker)
 
-                exited_today.add(
-                    ticker
-                )
+        check_cash_ledger(
+            cash,
+            positions,
+            trades,
+            current_date,
+        )
 
         # ----------------------------------------------------
         # 2. ENTRIES AT OPEN
         # ----------------------------------------------------
 
-        todays_entries = (
-            entry_events.get(
-                current_date,
-                [],
-            )
+        todays_entries = entry_events.get(
+            current_date,
+            [],
         )
 
         todays_entries = sorted(
             todays_entries,
-            key=lambda x:
-                x["Probability"],
+            key=lambda item: item["Probability"],
             reverse=True,
         )
 
         entries_executed = 0
 
         for event in todays_entries:
-
             if (
                 entries_executed
                 >= MAX_NEW_POSITIONS_PER_SIGNAL_DATE
             ):
                 break
 
-            ticker = event[
-                "Ticker"
-            ]
+            ticker = event["Ticker"]
 
             if ticker in exited_today:
                 continue
@@ -926,47 +815,29 @@ def run_portfolio_backtest(
                 continue
 
             row = bar_map.get(
-                (
-                    ticker,
-                    current_date
-                )
+                (ticker, current_date)
             )
 
             if row is None:
                 continue
 
-            # ------------------------------------------------
-            # Equity before entry.
-            # ------------------------------------------------
-
-            portfolio_equity = (
-                mark_to_market(
-                    cash,
-                    positions,
-                    last_prices,
-                )
+            portfolio_equity = mark_to_market(
+                cash,
+                positions,
+                last_prices,
             )
 
             probability = float(
-                event[
-                    "Probability"
-                ]
+                event["Probability"]
             )
 
             if (
                 probability
                 >= HIGH_CONVICTION_THRESHOLD
             ):
-
-                allocation_pct = (
-                    MAX_POSITION_60
-                )
-
+                allocation_pct = MAX_POSITION_60
             else:
-
-                allocation_pct = (
-                    MAX_POSITION_55
-                )
+                allocation_pct = MAX_POSITION_55
 
             target_value = (
                 portfolio_equity
@@ -987,10 +858,7 @@ def run_portfolio_backtest(
 
             execution_price = (
                 raw_open
-                * (
-                    1
-                    + SLIPPAGE_RATE
-                )
+                * (1 + SLIPPAGE_RATE)
             )
 
             entry_fee = (
@@ -1009,134 +877,61 @@ def run_portfolio_backtest(
             )
 
             cash -= allocation
-            
 
-            # ------------------------------------------------
-            # IMPORTANT:
-            #
-            # Peak starts at entry price.
-            #
-            # We DO NOT use today's High because it was not
-            # known when the position was opened.
-            # ------------------------------------------------
-
-            positions[
-                ticker
-            ] = {
-
-                "entry_date":
-                    current_date,
-
-                "entry_price":
-                    execution_price,
-
-                "shares":
-                    shares,
-
-                "entry_cost":
-                    allocation,
-
-                "entry_atr":
-                    float(
-                        event["ATR"]
-                    ),
-
-                "peak_price":
-                    execution_price,
+            # Peak starts at entry price. Today's high is not
+            # used here because the position did not exist
+            # before today's open.
+            positions[ticker] = {
+                "entry_date": current_date,
+                "entry_price": execution_price,
+                "shares": shares,
+                "entry_cost": allocation,
+                "entry_atr": float(event["ATR"]),
+                "peak_price": execution_price,
             }
-                       # DEBUG: true cash/ledger consistency check
-invested_cost = sum(
-    float(p["entry_cost"])
-    for p in positions.values()
-)
 
-realized_pnl = sum(
-    float(t["PnL"])
-    for t in trades
-)
+            entries_executed += 1
 
-ledger_value = (
-    cash
-    + invested_cost
-    - realized_pnl
-)
-
-if cash < -0.01:
-    raise RuntimeError(
-        f"CASH CONSISTENCY ERROR | "
-        f"date={current_date} | "
-        f"cash={cash:.2f} | "
-        f"invested_cost={invested_cost:.2f} | "
-        f"realized_pnl={realized_pnl:.2f} | "
-        f"ledger_value={ledger_value:.2f} | "
-        f"positions={list(positions.keys())}"
-    )
-
-if abs(ledger_value - INITIAL_CAPITAL) > 0.05:
-    raise RuntimeError(
-        f"LEDGER CONSISTENCY ERROR | "
-        f"date={current_date} | "
-        f"cash={cash:.2f} | "
-        f"invested_cost={invested_cost:.2f} | "
-        f"realized_pnl={realized_pnl:.2f} | "
-        f"ledger_value={ledger_value:.2f} | "
-        f"expected={INITIAL_CAPITAL:.2f} | "
-        f"positions={list(positions.keys())}"
-    )
-entries_executed += 1
+            check_cash_ledger(
+                cash,
+                positions,
+                trades,
+                current_date,
+            )
 
         # ----------------------------------------------------
         # 3. INTRADAY STOPS
         #
-        # ATR comes from previous available bar.
+        # ATR comes from the previous available bar.
+        # Entry-day positions are eligible because the entry
+        # occurred at today's open.
         # ----------------------------------------------------
 
-        for ticker in list(
-            positions.keys()
-        ):
-
+        for ticker in list(positions.keys()):
             row = bar_map.get(
-                (
-                    ticker,
-                    current_date
-                )
+                (ticker, current_date)
             )
 
             if row is None:
                 continue
 
-            position = positions[
-                ticker
-            ]
+            position = positions[ticker]
 
             entry_price = float(
-                position[
-                    "entry_price"
-                ]
+                position["entry_price"]
             )
 
             peak_before_bar = float(
-                position[
-                    "peak_price"
-                ]
+                position["peak_price"]
             )
 
-            previous_atr = row[
-                "PreviousATR"
-            ]
+            previous_atr = row["PreviousATR"]
 
-            if pd.isna(
-                previous_atr
-            ):
-
+            if pd.isna(previous_atr):
                 atr = float(
-                    position[
-                        "entry_atr"
-                    ]
+                    position["entry_atr"]
                 )
-
             else:
-
                 atr = float(
                     previous_atr
                 )
@@ -1177,38 +972,19 @@ entries_executed += 1
             # Gap through stop.
             # ------------------------------------------------
 
-            if (
-                current_open
-                <= effective_stop
-            ):
-
-                exit_price = (
-                    current_open
-                )
-
-                reason = (
-                    "STOP_GAP"
-                )
+            if current_open <= effective_stop:
+                exit_price = current_open
+                reason = "STOP_GAP"
 
             # ------------------------------------------------
             # Intraday stop.
             # ------------------------------------------------
 
-            elif (
-                current_low
-                <= effective_stop
-            ):
-
-                exit_price = (
-                    effective_stop
-                )
-
-                reason = (
-                    "ATR_STOP"
-                )
+            elif current_low <= effective_stop:
+                exit_price = effective_stop
+                reason = "ATR_STOP"
 
             if exit_price is not None:
-
                 cash = close_position(
                     ticker=ticker,
                     position=position,
@@ -1219,13 +995,9 @@ entries_executed += 1
                     trades=trades,
                 )
 
-                del positions[
-                    ticker
-                ]
+                del positions[ticker]
 
-                exited_today.add(
-                    ticker
-                )
+                exited_today.add(ticker)
 
                 continue
 
@@ -1233,20 +1005,25 @@ entries_executed += 1
             # Update peak only AFTER the risk check.
             #
             # Today's High is allowed here because the position
-            # survived the stop check and we are now updating
-            # the state for the NEXT bar.
+            # survived the stop check and the new peak is used
+            # only by future bars.
             # ------------------------------------------------
 
             current_high = float(
                 row["High"]
             )
 
-            position[
-                "peak_price"
-            ] = max(
+            position["peak_price"] = max(
                 peak_before_bar,
                 current_high,
             )
+
+        check_cash_ledger(
+            cash,
+            positions,
+            trades,
+            current_date,
+        )
 
         # ----------------------------------------------------
         # 4. END-OF-DAY MARK TO MARKET
@@ -1258,23 +1035,15 @@ entries_executed += 1
             last_prices,
         )
 
-        equity_curve.append({
-
-            "Date":
-                current_date,
-
-            "Equity":
-                equity,
-
-            "Cash":
-                cash,
-
-            "OpenPositions":
-                len(positions),
-
-            "Phase":
-                "EOD",
-        })
+        equity_curve.append(
+            {
+                "Date": current_date,
+                "Equity": equity,
+                "Cash": cash,
+                "OpenPositions": len(positions),
+                "Phase": "EOD",
+            }
+        )
 
     # ========================================================
     # FINAL LIQUIDATION
@@ -1284,17 +1053,10 @@ entries_executed += 1
         all_dates[-1]
     )
 
-    for ticker in list(
-        positions.keys()
-    ):
+    for ticker in list(positions.keys()):
+        position = positions[ticker]
 
-        position = positions[
-            ticker
-        ]
-
-        df = data_by_asset[
-            ticker
-        ]
+        df = data_by_asset[ticker]
 
         if df.empty:
             continue
@@ -1319,44 +1081,22 @@ entries_executed += 1
             trades=trades,
         )
 
-        del positions[
-            ticker
-        ]
+        del positions[ticker]
+
+    final_equity = float(cash)
 
     # --------------------------------------------------------
-    # Final equity AFTER liquidation.
-    # --------------------------------------------------------
-
-    final_equity = float(
-        cash
-    )
-
-    # --------------------------------------------------------
-    # Replace the final EOD equity point with the actual
-    # post-liquidation final equity.
-    #
-    # This guarantees that the equity curve and FinalEquity
-    # describe the same portfolio state.
+    # Replace the final EOD point with the actual post-
+    # liquidation portfolio value.
     # --------------------------------------------------------
 
     if equity_curve:
-
         equity_curve[-1] = {
-
-            "Date":
-                final_test_date,
-
-            "Equity":
-                final_equity,
-
-            "Cash":
-                final_equity,
-
-            "OpenPositions":
-                0,
-
-            "Phase":
-                "FINAL_LIQUIDATED",
+            "Date": final_test_date,
+            "Equity": final_equity,
+            "Cash": final_equity,
+            "OpenPositions": 0,
+            "Phase": "FINAL_LIQUIDATED",
         }
 
     # ========================================================
@@ -1364,24 +1104,26 @@ entries_executed += 1
     # ========================================================
 
     if final_equity < 0:
-
         raise RuntimeError(
             "FATAL: final equity is negative."
         )
 
-    if not np.isfinite(
-        final_equity
-    ):
-
+    if not np.isfinite(final_equity):
         raise RuntimeError(
             "FATAL: final equity is not finite."
         )
 
     if positions:
-
         raise RuntimeError(
             "FATAL: positions remain after final liquidation."
         )
+
+    check_cash_ledger(
+        cash,
+        positions,
+        trades,
+        final_test_date,
+    )
 
     # ========================================================
     # DATAFRAMES
@@ -1399,10 +1141,10 @@ entries_executed += 1
         equity_df["Date"]
     )
 
-    equity_df = equity_df.sort_values(
-        "Date"
-    ).reset_index(
-        drop=True
+    equity_df = (
+        equity_df
+        .sort_values("Date")
+        .reset_index(drop=True)
     )
 
     # ========================================================
@@ -1410,12 +1152,9 @@ entries_executed += 1
     # ========================================================
 
     if equity_df.empty:
-
         max_drawdown = 0.0
         sharpe = 0.0
-
     else:
-
         # ----------------------------------------------------
         # EOD equity only.
         # ----------------------------------------------------
@@ -1435,7 +1174,7 @@ entries_executed += 1
         )
 
         # ----------------------------------------------------
-        # Include the initial €10,000 explicitly in drawdown.
+        # Include initial capital explicitly in drawdown.
         # ----------------------------------------------------
 
         drawdown_series = pd.concat(
@@ -1463,12 +1202,7 @@ entries_executed += 1
         )
 
         # ----------------------------------------------------
-        # Sharpe:
-        # only actual EOD-to-EOD returns.
-        #
-        # The initial capital point is NOT treated as a daily
-        # return because it is a starting state, not a market
-        # observation.
+        # Sharpe uses actual EOD-to-EOD returns only.
         # ----------------------------------------------------
 
         returns = (
@@ -1485,7 +1219,6 @@ entries_executed += 1
             len(returns) > 1
             and returns.std(ddof=1) > 0
         ):
-
             sharpe = float(
                 (
                     returns.mean()
@@ -1493,9 +1226,7 @@ entries_executed += 1
                 )
                 * math.sqrt(252)
             )
-
         else:
-
             sharpe = 0.0
 
     # --------------------------------------------------------
@@ -1511,15 +1242,11 @@ entries_executed += 1
     # TRADE STATISTICS
     # ========================================================
 
-    trades_count = len(
-        trades_df
-    )
+    trades_count = len(trades_df)
 
     if trades_count > 0:
-
         wins = (
-            trades_df["PnL"]
-            > 0
+            trades_df["PnL"] > 0
         ).sum()
 
         win_rate = (
@@ -1542,18 +1269,13 @@ entries_executed += 1
         )
 
         if gross_loss > 0:
-
             profit_factor = (
                 gross_profit
                 / gross_loss
             )
-
         else:
-
             profit_factor = np.inf
-
     else:
-
         win_rate = 0.0
         profit_factor = 0.0
 
@@ -1569,41 +1291,20 @@ entries_executed += 1
         rtol=1e-10,
         atol=1e-8,
     ):
-
         raise RuntimeError(
             "FATAL: FinalEquity does not match "
             "the final equity curve value."
         )
 
-    # ========================================================
-    # SUMMARY
-    # ========================================================
-
     summary = {
-
-        "InitialCapital":
-            INITIAL_CAPITAL,
-
-        "FinalEquity":
-            final_equity,
-
-        "TotalReturn":
-            total_return,
-
-        "MaxDrawdown":
-            max_drawdown,
-
-        "Sharpe":
-            sharpe,
-
-        "Trades":
-            trades_count,
-
-        "WinRate":
-            win_rate,
-
-        "ProfitFactor":
-            profit_factor,
+        "InitialCapital": INITIAL_CAPITAL,
+        "FinalEquity": final_equity,
+        "TotalReturn": total_return,
+        "MaxDrawdown": max_drawdown,
+        "Sharpe": sharpe,
+        "Trades": trades_count,
+        "WinRate": win_rate,
+        "ProfitFactor": profit_factor,
     }
 
     return (
@@ -1618,7 +1319,6 @@ entries_executed += 1
 # ============================================================
 
 def main():
-
     output_dir = Path(
         "portfolio_backtest_results"
     )
@@ -1646,19 +1346,13 @@ def main():
     # --------------------------------------------------------
 
     for ticker in ASSETS:
-
         try:
-
-            df = download_data(
-                ticker
-            )
+            df = download_data(ticker)
 
             if df.empty:
-
                 print(
                     f"{ticker}: NO DATA"
                 )
-
                 continue
 
             predictions = (
@@ -1668,16 +1362,14 @@ def main():
             )
 
             if predictions.empty:
-
                 print(
                     f"{ticker}: NO OOS DATA"
                 )
-
                 continue
 
-            all_predictions[
-                ticker
-            ] = predictions
+            all_predictions[ticker] = (
+                predictions
+            )
 
             predictions.to_csv(
                 output_dir
@@ -1691,14 +1383,12 @@ def main():
             )
 
         except Exception as error:
-
             print(
                 f"{ticker}: ERROR -> "
                 f"{error}"
             )
 
     if not all_predictions:
-
         raise RuntimeError(
             "No OOS predictions generated."
         )
