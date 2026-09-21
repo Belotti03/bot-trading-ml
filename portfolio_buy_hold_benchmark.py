@@ -3,18 +3,17 @@ import pandas as pd
 import portfolio_backtest as base
 
 # ============================================================
-# BUY & HOLD BENCHMARK
-# Same 18 assets and same broad OOS window used by the
-# portfolio diagnostics.
+# CORRECTED BUY & HOLD BENCHMARK
 #
-# Portfolio:
-#   - €10,000 initial capital
-#   - equal-weight allocation across all 18 assets
-#   - buy once at the first available OPEN on/after OOS start
-#   - hold until the final available CLOSE
-#   - no ML, no stops, no rebalancing
+# Same 18 assets and same OOS window as the diagnostic tests.
+# One COMMON entry date is used for all assets:
+# the first date on which every asset has an available OPEN
+# inside the requested OOS window.
 #
-# This is a benchmark, not a proposed live strategy.
+# €10,000 is split equally across the 18 assets.
+# No ML, stops, trailing stops, rebalancing or additional trades.
+# Holdings are marked to market daily using each asset's latest
+# available close.
 # ============================================================
 
 INITIAL_CAPITAL = 10_000.0
@@ -23,22 +22,20 @@ OOS_END = pd.Timestamp("2026-09-19")
 RESULTS_DIR = Path("portfolio_buy_hold_benchmark_results")
 
 
-def load_benchmark_data():
+def load_data():
     data = {}
 
     print("=" * 70)
-    print("BUY & HOLD BENCHMARK")
+    print("CORRECTED BUY & HOLD BENCHMARK")
     print("=" * 70)
-    print(f"Initial capital : €{INITIAL_CAPITAL:,.2f}")
-    print(f"OOS start       : {OOS_START.date()}")
-    print(f"OOS end         : {OOS_END.date()}")
-    print(f"Assets          : {len(base.ASSETS)}")
+    print(f"Requested OOS window : {OOS_START.date()} -> {OOS_END.date()}")
+    print(f"Initial capital      : €{INITIAL_CAPITAL:,.2f}")
+    print(f"Assets               : {len(base.ASSETS)}")
     print("-" * 70)
 
     for ticker in base.ASSETS:
         print(f"Downloading {ticker}...")
         df = base.download_data(ticker).copy()
-
         df.index = pd.to_datetime(df.index)
         df = df.sort_index()
 
@@ -49,8 +46,7 @@ def load_benchmark_data():
 
         if period.empty:
             raise ValueError(
-                f"No data for {ticker} inside benchmark window "
-                f"{OOS_START.date()} -> {OOS_END.date()}"
+                f"No data for {ticker} in the requested OOS window."
             )
 
         data[ticker] = period
@@ -58,73 +54,79 @@ def load_benchmark_data():
     return data
 
 
-def run_buy_and_hold(data):
-    # Equal-weight the initial capital across the 18 assets.
+def find_common_entry_date(data):
+    common_dates = None
+
+    for ticker in base.ASSETS:
+        dates = set(pd.to_datetime(data[ticker].index))
+        if common_dates is None:
+            common_dates = dates
+        else:
+            common_dates &= dates
+
+    if not common_dates:
+        raise ValueError("No common trading date exists for all 18 assets.")
+
+    common_dates = sorted(common_dates)
+
+    # We use the first common date in the requested OOS window.
+    return pd.Timestamp(common_dates[0])
+
+
+def run_benchmark(data, entry_date):
     allocation = INITIAL_CAPITAL / len(base.ASSETS)
 
-    rows = []
-    total_final = 0.0
+    holdings = []
+    positions = {}
 
     for ticker in base.ASSETS:
         df = data[ticker]
 
-        entry_row = df.iloc[0]
-        exit_row = df.iloc[-1]
+        if entry_date not in df.index:
+            raise ValueError(
+                f"{ticker} has no data on common entry date {entry_date.date()}."
+            )
 
-        entry_date = pd.Timestamp(df.index[0])
-        exit_date = pd.Timestamp(df.index[-1])
-
+        entry_row = df.loc[entry_date]
         entry_price = float(entry_row["Open"])
-        exit_price = float(exit_row["Close"])
 
-        if entry_price <= 0 or exit_price <= 0:
-            raise ValueError(f"Invalid price for {ticker}")
+        if entry_price <= 0:
+            raise ValueError(f"Invalid entry price for {ticker}.")
 
         shares = allocation / entry_price
-        final_value = shares * exit_price
-        pnl = final_value - allocation
-        asset_return = final_value / allocation - 1.0
 
-        total_final += final_value
+        positions[ticker] = {
+            "shares": shares,
+            "entry_price": entry_price,
+            "allocation": allocation,
+        }
 
-        rows.append({
-            "Ticker": ticker,
-            "EntryDate": entry_date.date().isoformat(),
-            "ExitDate": exit_date.date().isoformat(),
-            "EntryPrice": entry_price,
-            "ExitPrice": exit_price,
-            "InitialAllocation": allocation,
-            "Shares": shares,
-            "FinalValue": final_value,
-            "PnL": pnl,
-            "Return": asset_return,
-        })
-
-    trades_df = pd.DataFrame(rows)
-
-    total_return = total_final / INITIAL_CAPITAL - 1.0
-
-    # Equal-weight buy-and-hold has no intermediate trading.
-    # Build an approximate daily portfolio equity curve by valuing
-    # the fixed share positions at each asset's latest available
-    # close, starting from the initial capital.
-    equity_dates = sorted(
-        set().union(*[set(df.index) for df in data.values()])
+    # Common dates after entry. We mark every fixed position to the
+    # latest available close, so weekends/asset-specific holidays
+    # do not create artificial losses.
+    all_dates = sorted(
+        set().union(
+            *[
+                set(
+                    data[ticker].loc[
+                        data[ticker].index >= entry_date
+                    ].index
+                )
+                for ticker in base.ASSETS
+            ]
+        )
     )
 
+    last_close = {}
     equity_rows = []
 
-    positions = {
-        row["Ticker"]: {
-            "shares": row["Shares"],
-            "allocation": row["InitialAllocation"],
-        }
-        for _, row in trades_df.iterrows()
-    }
+    # Explicit initial point immediately before entry.
+    equity_rows.append({
+        "Date": entry_date - pd.Timedelta(days=1),
+        "Equity": INITIAL_CAPITAL,
+    })
 
-    last_prices = {}
-
-    for date in equity_dates:
+    for date in all_dates:
         date = pd.Timestamp(date)
         equity = 0.0
 
@@ -132,31 +134,31 @@ def run_buy_and_hold(data):
             df = data[ticker]
 
             if date in df.index:
-                last_prices[ticker] = float(df.loc[date, "Close"])
+                last_close[ticker] = float(df.loc[date, "Close"])
 
-            if ticker in last_prices:
-                equity += positions[ticker]["shares"] * last_prices[ticker]
+            if ticker not in last_close:
+                # This should not occur after the common entry date.
+                raise ValueError(
+                    f"Missing first close for {ticker} on {date.date()}."
+                )
 
-        # Until every asset has a first price, this can be below the
-        # initial capital. Once all assets have entered, it is the
-        # actual marked-to-market portfolio value.
+            equity += positions[ticker]["shares"] * last_close[ticker]
+
         equity_rows.append({
             "Date": date,
             "Equity": equity,
         })
 
-    equity_df = pd.DataFrame(equity_rows)
+    equity_df = (
+        pd.DataFrame(equity_rows)
+        .sort_values("Date")
+        .drop_duplicates("Date", keep="last")
+        .reset_index(drop=True)
+    )
 
-    # Add explicit initial point for drawdown/return calculations.
-    initial_point = pd.DataFrame([{
-        "Date": OOS_START - pd.Timedelta(days=1),
-        "Equity": INITIAL_CAPITAL,
-    }])
-
-    equity_df = pd.concat([initial_point, equity_df], ignore_index=True)
-    equity_df = equity_df.sort_values("Date").drop_duplicates(
-        subset=["Date"], keep="last"
-    ).reset_index(drop=True)
+    # Final value is the last common/available marked-to-market value.
+    final_equity = float(equity_df.iloc[-1]["Equity"])
+    total_return = final_equity / INITIAL_CAPITAL - 1.0
 
     running_max = equity_df["Equity"].cummax()
     drawdown = equity_df["Equity"] / running_max - 1.0
@@ -171,30 +173,59 @@ def run_buy_and_hold(data):
     else:
         sharpe = 0.0
 
+    # Per-asset holdings report.
+    for ticker in base.ASSETS:
+        position = positions[ticker]
+        final_price = last_close[ticker]
+        final_value = position["shares"] * final_price
+
+        holdings.append({
+            "Ticker": ticker,
+            "EntryDate": entry_date.date().isoformat(),
+            "ExitDate": pd.Timestamp(all_dates[-1]).date().isoformat(),
+            "EntryPrice": position["entry_price"],
+            "ExitPrice": final_price,
+            "InitialAllocation": position["allocation"],
+            "Shares": position["shares"],
+            "FinalValue": final_value,
+            "PnL": final_value - position["allocation"],
+            "Return": final_value / position["allocation"] - 1.0,
+        })
+
+    holdings_df = pd.DataFrame(holdings)
+
     summary = {
         "InitialCapital": INITIAL_CAPITAL,
-        "FinalEquity": total_final,
+        "FinalEquity": final_equity,
         "TotalReturn": total_return,
         "MaxDrawdown": max_drawdown,
         "Sharpe": sharpe,
         "Assets": len(base.ASSETS),
         "Benchmark": "Equal-weight Buy & Hold",
-        "StartDate": str(OOS_START.date()),
-        "EndDate": str(OOS_END.date()),
+        "RequestedStartDate": str(OOS_START.date()),
+        "RequestedEndDate": str(OOS_END.date()),
+        "CommonEntryDate": str(entry_date.date()),
+        "FinalMarkDate": str(pd.Timestamp(all_dates[-1]).date()),
     }
 
-    return summary, equity_df, trades_df
+    return summary, equity_df, holdings_df
 
 
 def main():
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    data = load_benchmark_data()
-    summary, equity_df, holdings_df = run_buy_and_hold(data)
+    data = load_data()
+    entry_date = find_common_entry_date(data)
 
-    summary_df = pd.DataFrame([summary])
+    print()
+    print(f"COMMON ENTRY DATE: {entry_date.date()}")
 
-    summary_df.to_csv(
+    summary, equity_df, holdings_df = run_benchmark(
+        data,
+        entry_date,
+    )
+
+    pd.DataFrame([summary]).to_csv(
         RESULTS_DIR / "portfolio_buy_hold_summary.csv",
         index=False,
     )
@@ -209,15 +240,16 @@ def main():
 
     print()
     print("=" * 70)
-    print("BUY & HOLD RESULT")
+    print("CORRECTED BUY & HOLD RESULT")
     print("=" * 70)
-    print(f"Initial capital : €{summary['InitialCapital']:,.2f}")
-    print(f"Final equity    : €{summary['FinalEquity']:,.2f}")
-    print(f"Total return    : {summary['TotalReturn']:.2%}")
-    print(f"Max drawdown    : {summary['MaxDrawdown']:.2%}")
-    print(f"Sharpe          : {summary['Sharpe']:.2f}")
-    print(f"Assets          : {summary['Assets']}")
-    print(f"Period          : {summary['StartDate']} -> {summary['EndDate']}")
+    print(f"Common entry date : {summary['CommonEntryDate']}")
+    print(f"Final mark date   : {summary['FinalMarkDate']}")
+    print(f"Initial capital   : €{summary['InitialCapital']:,.2f}")
+    print(f"Final equity      : €{summary['FinalEquity']:,.2f}")
+    print(f"Total return      : {summary['TotalReturn']:.2%}")
+    print(f"Max drawdown      : {summary['MaxDrawdown']:.2%}")
+    print(f"Sharpe            : {summary['Sharpe']:.2f}")
+    print(f"Assets            : {summary['Assets']}")
     print("=" * 70)
 
 
