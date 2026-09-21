@@ -24,49 +24,47 @@ ML_OFF_PROBABILITY = {
 
 
 def generate_non_ml_predictions(df):
-    """Create a deterministic, non-ML probability-like signal.
+    """Create a non-ML baseline with the exact schema expected by
+    portfolio_backtest.run_portfolio_backtest().
 
-    0.60: 20d momentum positive AND close above SMA20
-    0.50: mixed conditions
-    0.40: 20d momentum negative AND close below SMA20
-
-    This is only used to feed the SAME portfolio engine as ML ON.
-    No model fitting or future information is used.
+    0.60 = 20d momentum positive AND Close > SMA20
+    0.50 = mixed conditions
+    0.40 = 20d momentum negative AND Close < SMA20
     """
-    data = df.copy()
+    data = base.calculate_features(df).copy()
     data["SMA20"] = data["Close"].rolling(20).mean()
     data["RET20"] = data["Close"].pct_change(20)
+    data = data.dropna(subset=["SMA20", "RET20", "ATR", "Open", "High", "Low", "Close"]).copy()
 
     rows = []
-    for i in range(len(data) - 1):
+    for i in range(len(data)):
         row = data.iloc[i]
-
-        if pd.isna(row["SMA20"]) or pd.isna(row["RET20"]):
-            continue
-
-        bullish = row["Close"] > row["SMA20"] and row["RET20"] > 0
-        bearish = row["Close"] < row["SMA20"] and row["RET20"] < 0
-
+        bullish = float(row["Close"]) > float(row["SMA20"]) and float(row["RET20"]) > 0
+        bearish = float(row["Close"]) < float(row["SMA20"]) and float(row["RET20"]) < 0
         if bullish:
             probability = ML_OFF_PROBABILITY["BULLISH"]
         elif bearish:
             probability = ML_OFF_PROBABILITY["BEARISH"]
         else:
             probability = ML_OFF_PROBABILITY["NEUTRAL"]
-
-        # Match the structure consumed by run_portfolio_backtest().
-        signal_date = data.index[i]
         rows.append({
-            "Date": signal_date,
-            "Probability": probability,
+            "Date": pd.Timestamp(data.index[i]),
+            "Open": float(row["Open"]),
+            "High": float(row["High"]),
+            "Low": float(row["Low"]),
+            "Close": float(row["Close"]),
+            "ATR": float(row["ATR"]),
+            "Probability": float(probability),
         })
 
-    if not rows:
-        return pd.DataFrame(columns=["Probability"])
-
-    out = pd.DataFrame(rows).set_index("Date")
-    out.index = pd.to_datetime(out.index)
-    return out[["Probability"]]
+    result = pd.DataFrame(rows)
+    if result.empty:
+        return result
+    result = result.sort_values("Date").reset_index(drop=True)
+    result["PreviousProbability"] = result["Probability"].shift(1)
+    result["PreviousATR"] = result["ATR"].shift(1)
+    result["NextAvailableDate"] = result["Date"].shift(-1)
+    return result
 
 
 def generate_signal_sets():
