@@ -146,8 +146,7 @@ def build_tie_safe_ml_off_predictions(df):
 def add_tie_safe_probabilities(predictions):
     # Preserve the exact same bullish/bearish signal condition.
     # Only replace equal bullish probabilities with a continuous
-    # cross-sectional ranking to make top-5 selection deterministic
-    # based on signal strength rather than ASSETS order.
+    # cross-sectional ranking to avoid asset-order tie breaking.
     frames = []
 
     for ticker, df in predictions.items():
@@ -155,54 +154,30 @@ def add_tie_safe_probabilities(predictions):
         work["Ticker"] = ticker
         frames.append(work)
 
+    if not frames:
+        return {}
+
     combined = pd.concat(frames, ignore_index=True)
+    combined["Probability"] = ORIGINAL_BEARISH_PROB
 
-    def score_group(group):
-        bullish = group["Bullish"]
+    # Avoid groupby().apply(): newer pandas versions can exclude the
+    # grouping column from the applied frame, which caused KeyError: Date.
+    for signal_date in combined["Date"].dropna().unique():
+        mask = combined["Date"] == signal_date
+        candidates = combined[mask & combined["Bullish"]].copy()
 
-        group["Probability"] = ORIGINAL_BEARISH_PROB
+        if candidates.empty:
+            continue
 
-        if bullish.any():
-            candidates = group.loc[bullish].copy()
+        ret_rank = candidates["RET20"].rank(method="average", pct=True)
+        sma_distance = candidates["Close"] / candidates["SMA20"] - 1.0
+        sma_rank = sma_distance.rank(method="average", pct=True)
+        strength = 0.5 * ret_rank + 0.5 * sma_rank
 
-            # Two components:
-            # 1) 20-day return
-            # 2) distance above SMA20
-            ret_rank = candidates["RET20"].rank(
-                method="average",
-                pct=True,
-            )
-
-            sma_distance = (
-                candidates["Close"] / candidates["SMA20"] - 1.0
-            )
-            sma_rank = sma_distance.rank(
-                method="average",
-                pct=True,
-            )
-
-            strength = 0.5 * ret_rank + 0.5 * sma_rank
-
-            group.loc[
-                candidates.index,
-                "Probability",
-            ] = (
-                TIE_SAFE_MIN_PROB
-                + strength
-                * (
-                    TIE_SAFE_MAX_PROB
-                    - TIE_SAFE_MIN_PROB
-                )
-            )
-
-        return group
-
-    combined = (
-        combined
-        .groupby("Date", group_keys=False)
-        .apply(score_group)
-        .reset_index(drop=True)
-    )
+        combined.loc[candidates.index, "Probability"] = (
+            TIE_SAFE_MIN_PROB
+            + strength * (TIE_SAFE_MAX_PROB - TIE_SAFE_MIN_PROB)
+        )
 
     output = {}
 
@@ -214,14 +189,9 @@ def add_tie_safe_probabilities(predictions):
             .reset_index(drop=True)
         )
 
-        work["PreviousProbability"] = (
-            work["Probability"].shift(1)
-        )
+        work["PreviousProbability"] = work["Probability"].shift(1)
         work["PreviousATR"] = work["ATR"].shift(1)
-        work["NextAvailableDate"] = (
-            work["Date"].shift(-1)
-        )
-
+        work["NextAvailableDate"] = work["Date"].shift(-1)
         output[ticker] = work
 
     return output
@@ -239,11 +209,11 @@ def load_predictions():
             print(f"WARNING: no data for {ticker}")
             continue
 
+        # One download per ticker; both variants use identical data.
         original[ticker] = build_original_ml_off_predictions(df)
         tie_safe_base[ticker] = build_tie_safe_ml_off_predictions(df)
 
     tie_safe = add_tie_safe_probabilities(tie_safe_base)
-
     return original, tie_safe
 
 
