@@ -5,7 +5,6 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-# Same universe used by the portfolio backtests.
 ASSETS = [
     "BTC-USD", "ETH-USD", "NVDA", "AMD", "MSTR", "COIN",
     "TSM", "PLTR", "ARM", "SMCI", "TSLA", "META", "AMZN",
@@ -18,13 +17,14 @@ INITIAL_CAPITAL = 10_000.0
 FEE_RATE = 0.001
 SLIPPAGE_RATE = 0.0005
 
-# The four chronological periods used by the ML-OFF robustness run.
+# EXACT same periods used by the ML-OFF robustness test.
 PERIODS = [
-    ("P1", "2025-03-08", "2025-07-26"),
-    ("P2", "2025-07-27", "2025-12-13"),
-    ("P3", "2025-12-14", "2026-05-02"),
-    ("P4", "2026-05-03", "2026-09-19"),
+    ("P1", "2024-10-12", "2025-04-07"),
+    ("P2", "2025-04-08", "2025-10-02"),
+    ("P3", "2025-10-03", "2026-03-29"),
+    ("P4", "2026-03-30", "2026-09-22"),
 ]
+
 RESULTS_DIR = Path("portfolio_buy_hold_period_benchmark_results")
 
 
@@ -45,14 +45,20 @@ def download_asset(ticker):
         df.columns = df.columns.get_level_values(0)
 
     required = ["Open", "Close"]
+
     if any(col not in df.columns for col in required):
         return pd.DataFrame()
 
     df = df[required].copy()
     df.index = pd.to_datetime(df.index).tz_localize(None)
-    df = df.replace([np.inf, -np.inf], np.nan).dropna()
 
-    return df.sort_index()
+    df = (
+        df.replace([np.inf, -np.inf], np.nan)
+        .dropna()
+        .sort_index()
+    )
+
+    return df
 
 
 def portfolio_value(shares, cash, prices):
@@ -60,6 +66,7 @@ def portfolio_value(shares, cash, prices):
 
     for ticker, qty in shares.items():
         price = prices.get(ticker)
+
         if price is not None and np.isfinite(price):
             value += float(qty) * float(price)
 
@@ -71,8 +78,9 @@ def max_drawdown(equity):
         return np.nan
 
     peak = equity.cummax()
-    dd = equity / peak - 1.0
-    return float(dd.min())
+    drawdown = equity / peak - 1.0
+
+    return float(drawdown.min())
 
 
 def sharpe_ratio(equity):
@@ -81,13 +89,18 @@ def sharpe_ratio(equity):
 
     returns = equity.pct_change().dropna()
 
-    if len(returns) < 2 or returns.std(ddof=1) == 0:
+    if len(returns) < 2:
+        return np.nan
+
+    std = returns.std(ddof=1)
+
+    if std == 0:
         return np.nan
 
     return float(
         np.sqrt(252.0)
         * returns.mean()
-        / returns.std(ddof=1)
+        / std
     )
 
 
@@ -95,8 +108,7 @@ def run_period(period_name, requested_start, requested_end, data):
     requested_start = pd.Timestamp(requested_start)
     requested_end = pd.Timestamp(requested_end)
 
-    # Only dates where every asset has a valid quote can be used as
-    # the common equal-weight entry date.
+    # Common entry date: all 18 assets must have a valid quote.
     common_dates = None
 
     for ticker in ASSETS:
@@ -107,7 +119,10 @@ def run_period(period_name, requested_start, requested_end, data):
             ]
         )
 
-        common_dates = dates if common_dates is None else common_dates & dates
+        if common_dates is None:
+            common_dates = dates
+        else:
+            common_dates &= dates
 
     common_dates = sorted(common_dates)
 
@@ -118,9 +133,7 @@ def run_period(period_name, requested_start, requested_end, data):
 
     entry_date = common_dates[0]
 
-    # Use all dates from entry through requested end. Each asset is
-    # marked with its latest available close, so non-trading days
-    # do not create artificial zero values.
+    # All available dates from entry through requested end.
     union_dates = sorted(
         {
             date
@@ -137,19 +150,19 @@ def run_period(period_name, requested_start, requested_end, data):
 
     allocation_gross = INITIAL_CAPITAL / len(ASSETS)
 
-    # Entry at the common date open, with the same slippage/fee model.
     cash = INITIAL_CAPITAL
     shares = {}
 
     entry_rows = []
 
+    # Equal-weight buy & hold entry.
     for ticker in ASSETS:
         row = data[ticker].loc[entry_date]
+
         raw_open = float(row["Open"])
 
         entry_price = raw_open * (1.0 + SLIPPAGE_RATE)
 
-        # Allocate equal gross capital before transaction fee.
         gross = allocation_gross
         fee = gross * FEE_RATE
         net_invested = gross - fee
@@ -173,9 +186,11 @@ def run_period(period_name, requested_start, requested_end, data):
     equity_rows = []
     last_prices = {}
 
+    # Daily mark-to-market.
     for current_date in union_dates:
         for ticker in ASSETS:
             df = data[ticker]
+
             eligible = df.index[
                 (df.index >= entry_date)
                 & (df.index <= current_date)
@@ -183,6 +198,7 @@ def run_period(period_name, requested_start, requested_end, data):
 
             if len(eligible):
                 last_date = eligible[-1]
+
                 last_prices[ticker] = float(
                     df.loc[last_date, "Close"]
                 )
@@ -200,16 +216,7 @@ def run_period(period_name, requested_start, requested_end, data):
             }
         )
 
-    equity_df = pd.DataFrame(equity_rows)
-
-    # Final liquidation on each asset's latest available close.
-    final_date = max(
-        data[ticker].index[
-            data[ticker].index <= requested_end
-        ].max()
-        for ticker in ASSETS
-    )
-
+    # Final liquidation.
     final_cash = cash
     liquidation_rows = []
 
@@ -223,9 +230,13 @@ def run_period(period_name, requested_start, requested_end, data):
             continue
 
         last_date = eligible[-1]
-        raw_close = float(data[ticker].loc[last_date, "Close"])
+
+        raw_close = float(
+            data[ticker].loc[last_date, "Close"]
+        )
 
         exit_price = raw_close * (1.0 - SLIPPAGE_RATE)
+
         gross_value = shares[ticker] * exit_price
         fee = gross_value * FEE_RATE
         net_value = gross_value - fee
@@ -246,10 +257,18 @@ def run_period(period_name, requested_start, requested_end, data):
 
     final_equity = final_cash
 
+    equity_df = pd.DataFrame(equity_rows)
+
     # Add final liquidation point.
-    equity_df = equity_df.copy()
+    final_mark_date = max(
+        data[ticker].index[
+            data[ticker].index <= requested_end
+        ].max()
+        for ticker in ASSETS
+    )
+
     equity_df.loc[len(equity_df)] = {
-        "Date": pd.Timestamp(final_date),
+        "Date": pd.Timestamp(final_mark_date),
         "Equity": final_equity,
     }
 
@@ -261,23 +280,29 @@ def run_period(period_name, requested_start, requested_end, data):
         .reset_index(drop=True)
     )
 
-    # Explicit initial point for drawdown calculation.
+    # Explicit initial point for drawdown.
     initial_row = pd.DataFrame(
-        [{
-            "Date": pd.Timestamp(entry_date) - pd.Timedelta(days=1),
-            "Equity": INITIAL_CAPITAL,
-        }]
+        [
+            {
+                "Date": pd.Timestamp(entry_date)
+                - pd.Timedelta(days=1),
+                "Equity": INITIAL_CAPITAL,
+            }
+        ]
     )
 
-    equity_for_metrics = pd.concat(
-        [initial_row, equity_df],
-        ignore_index=True,
-    ).drop_duplicates(
-        subset=["Date"],
-        keep="last",
-    ).sort_values("Date").reset_index(drop=True)
-
-    final_equity = float(equity_df["Equity"].iloc[-1])
+    equity_for_metrics = (
+        pd.concat(
+            [initial_row, equity_df],
+            ignore_index=True,
+        )
+        .drop_duplicates(
+            subset=["Date"],
+            keep="last",
+        )
+        .sort_values("Date")
+        .reset_index(drop=True)
+    )
 
     summary = {
         "Benchmark": "Equal-weight Buy & Hold",
@@ -285,7 +310,7 @@ def run_period(period_name, requested_start, requested_end, data):
         "RequestedStartDate": str(requested_start.date()),
         "RequestedEndDate": str(requested_end.date()),
         "CommonEntryDate": str(entry_date.date()),
-        "FinalMarkDate": str(final_date.date()),
+        "FinalMarkDate": str(final_mark_date.date()),
         "InitialCapital": INITIAL_CAPITAL,
         "FinalEquity": final_equity,
         "TotalReturn": final_equity / INITIAL_CAPITAL - 1.0,
@@ -350,6 +375,7 @@ def main():
         summaries.append(summary)
 
         period_dir = RESULTS_DIR / period_name
+
         period_dir.mkdir(
             parents=True,
             exist_ok=True,
@@ -384,13 +410,19 @@ def main():
     summary_df = pd.DataFrame(summaries)
 
     summary_df.to_csv(
-        RESULTS_DIR / "portfolio_buy_hold_period_summary.csv",
+        RESULTS_DIR
+        / "portfolio_buy_hold_period_summary.csv",
         index=False,
     )
 
-    print("\n============================================================")
+    print(
+        "\n============================================================"
+    )
     print("BUY & HOLD PERIOD BENCHMARK")
-    print("============================================================")
+    print(
+        "============================================================"
+    )
+
     print(
         summary_df[
             [
