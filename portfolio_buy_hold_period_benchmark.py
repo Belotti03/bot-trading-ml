@@ -20,12 +20,11 @@ SLIPPAGE_RATE = 0.0005
 
 # The four chronological periods used by the ML-OFF robustness run.
 PERIODS = [
-    ("P1", "2024-10-12", "2025-07-04"),
-    ("P2", "2025-04-08", "2025-10-02"),
-    ("P3", "2025-10-03", "2026-03-29"),
-    ("P4", "2026-03-30", "2026-09-22"),
+    ("P1", "2025-03-08", "2025-07-26"),
+    ("P2", "2025-07-27", "2025-12-13"),
+    ("P3", "2025-12-14", "2026-05-02"),
+    ("P4", "2026-05-03", "2026-09-19"),
 ]
-
 RESULTS_DIR = Path("portfolio_buy_hold_period_benchmark_results")
 
 
