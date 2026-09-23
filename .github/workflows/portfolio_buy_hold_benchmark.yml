@@ -1,12 +1,12 @@
-name: Portfolio Buy Hold Benchmark
+name: Buy Hold Period Benchmark
 
 on:
   workflow_dispatch:
 
 jobs:
-  buy-hold:
+  benchmark:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout repository
@@ -20,15 +20,15 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install yfinance xgboost lightgbm scikit-learn pandas joblib requests
+          pip install yfinance pandas numpy
 
-      - name: Run Buy & Hold benchmark
-        run: python portfolio_buy_hold_benchmark.py
+      - name: Run buy & hold period benchmark
+        run: python portfolio_buy_hold_period_benchmark.py
 
       - name: Upload benchmark results
         uses: actions/upload-artifact@v4
         with:
-          name: portfolio-buy-hold-benchmark-results
+          name: portfolio-buy-hold-period-benchmark-results
           path: |
-            portfolio_buy_hold_benchmark_results/
+            portfolio_buy_hold_period_benchmark_results/
           if-no-files-found: error
