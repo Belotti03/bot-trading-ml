@@ -497,8 +497,8 @@ def main():
     # 10. Console reconciliation
     # --------------------------------------------------------
 
-    official_final = float(summary["Final equity"])
-    official_return = float(summary["Total return"])
+    official_final = float(summary["FinalEquity"])
+    official_return = float(summary["TotalReturn"])
     trade_pnl = float(trades["PnL"].sum())
 
     print()
