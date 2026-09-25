@@ -1,4 +1,4 @@
-name: Portfolio Asset Selection Analysis
+name: Portfolio Asset Selection Analysis Corrected
 
 on:
   workflow_dispatch:
@@ -22,13 +22,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install yfinance xgboost lightgbm scikit-learn pandas joblib requests
 
-      - name: Run asset selection analysis
-        run: python portfolio_asset_selection_analysis.py
+      - name: Run corrected asset selection analysis
+        run: python portfolio_asset_selection_analysis_corrected.py
 
       - name: Upload analysis results
         uses: actions/upload-artifact@v4
         with:
-          name: portfolio-asset-selection-results
+          name: portfolio-asset-selection-results-corrected
           path: |
-            portfolio_asset_selection_results/
+            portfolio_asset_selection_results_corrected/
           if-no-files-found: error
