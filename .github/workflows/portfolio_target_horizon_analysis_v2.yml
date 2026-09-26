@@ -1,0 +1,39 @@
+name: Portfolio ML Target Horizon Analysis
+
+on:
+  workflow_dispatch:
+
+jobs:
+  target-horizon:
+    name: Horizon ${{ matrix.horizon }} days
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    strategy:
+      fail-fast: false
+      matrix:
+        horizon: [1, 3, 5, 10]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install yfinance xgboost lightgbm scikit-learn pandas joblib requests
+
+      - name: Run target horizon
+        run: |
+          python portfolio_target_horizon_analysis.py --horizon ${{ matrix.horizon }}
+
+      - name: Upload horizon results
+        uses: actions/upload-artifact@v4
+        with:
+          name: portfolio-target-horizon-${{ matrix.horizon }}d
+          path: portfolio_target_horizon_results/horizon_${{ matrix.horizon }}d/
+          retention-days: 30
