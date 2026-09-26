@@ -1,7 +1,9 @@
 import pandas as pd
 from pathlib import Path
 import portfolio_backtest as base
-
+# Asset-selection analysis must cover the full official P1-P4 period.
+# Do not inherit the 2y production/backtest lookback from portfolio_backtest.py.
+base.LOOKBACK_PERIOD = "5y"
 
 # ============================================================
 # OFFICIAL V1 BASELINE
