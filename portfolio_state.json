@@ -1,5 +1,5 @@
 {
-    "cash": 0.0,
+    "cash": NaN,
     "positions": {
         "PLTR": {
             "qty": 1.940049723741483,
@@ -21,11 +21,6 @@
             "entry_price": 202.16000366210938,
             "peak_price": 202.16000366210938
         },
-        "TSLA": {
-            "qty": 1.6244124139528135,
-            "entry_price": 373.43499755859375,
-            "peak_price": 373.43499755859375
-        },
         "AMZN": {
             "qty": 2.427809350663576,
             "entry_price": 249.86000061035156,
@@ -33,7 +28,7 @@
         }
     },
     "initial_balance": 10000.0,
-    "day_start_val": 10600.891084634755,
-    "last_run_date": "2026-09-25",
+    "day_start_val": NaN,
+    "last_run_date": "2026-09-26",
     "initial_capital": 10000.0
 }
