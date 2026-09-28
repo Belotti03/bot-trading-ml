@@ -6,11 +6,6 @@
             "entry_price": 174.33999633789062,
             "peak_price": 192.58999633789062
         },
-        "GLD": {
-            "qty": 6.985369409289747,
-            "entry_price": 401.42999267578125,
-            "peak_price": 401.42999267578125
-        },
         "NVDA": {
             "qty": 14.117921206439346,
             "entry_price": 228.1300048828125,
@@ -29,6 +24,6 @@
     },
     "initial_balance": 10000.0,
     "day_start_val": NaN,
-    "last_run_date": "2026-09-26",
+    "last_run_date": "2026-09-28",
     "initial_capital": 10000.0
 }
