@@ -160,7 +160,15 @@ def parse_bar_date(text):
 
 
 def asof_problem(asof_text, ticker, now=None):
-    """Motivo per cui un asof non e' utilizzabile, oppure None se valido."""
+    """
+    Motivo per cui un asof non e' utilizzabile, oppure None se valido.
+
+    Applica la stessa policy del producer: formato, data non futura, cap di
+    eta' per mercato e chiusura di sessione consolidata secondo calendario e
+    DST. E' l'unico punto in cui la policy e' implementata, cosi' consumer e
+    producer non possono divergere: un payload esterno o alterato con un asof
+    non ancora consolidato viene rifiutato anche se la data e' di oggi.
+    """
     market = market_for_ticker(ticker)
 
     if market is None:
@@ -187,6 +195,15 @@ def asof_problem(asof_text, ticker, now=None):
         return (
             f"asof obsoleto ({asof_text}: {age_days} giorni, "
             f"cap {max_age} per {market})"
+        )
+
+    if not is_session_complete(bar_date, market, now=now):
+        margin_minutes = int(SETTLEMENT_MARGIN.total_seconds() // 60)
+
+        return (
+            f"sessione {asof_text} non ancora consolidata per {market} "
+            f"(chiusura {session_close_instant(bar_date, market).isoformat()} "
+            f"+ {margin_minutes} min)"
         )
 
     return None

@@ -13,6 +13,7 @@ from safe_state import (
     is_valid_cash,
     is_valid_price,
     is_valid_probability,
+    utc_now,
     validate_state_payload
 )
 
@@ -25,6 +26,11 @@ if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
 
 STATE_FILE = "portfolio_state.json"
 SCOUT_FILE = "scout_signals.json"
+
+# Istante unico di riferimento: tutti i segnali vengono valutati contro lo
+# stesso momento, altrimenti ticker diversi potrebbero cadere ai due lati del
+# margine di consolidamento.
+RUN_NOW = utc_now()
 
 def abort(message):
     """Interrompe il run senza toccare lo stato persistito."""
@@ -127,28 +133,32 @@ except Exception as e:
 if not isinstance(raw_scout, dict):
     abort("segnali scout: il payload non è un oggetto JSON.")
 
-# Dati non finiti e barre non sufficientemente recenti vengono scartati qui,
-# prima di entrare in qualunque calcolo di cassa o equity.
+# Dati non finiti e barre non autorizzate dalla policy di recency vengono
+# scartati qui, prima di entrare in qualunque calcolo di cassa o equity.
+# asof_problem riapplica la policy completa del producer: non ci si fida del
+# fatto che il payload sia stato prodotto da model_engine.py.
 scout = {}
-rejected = []
+rejected = {}
 for ticker, entry in raw_scout.items():
     if not isinstance(entry, dict):
-        rejected.append(f"{ticker} (voce non valida)")
+        rejected[ticker] = "voce non valida"
         continue
     if not is_valid_probability(entry.get("prob")):
-        rejected.append(f"{ticker} (prob {entry.get('prob')!r})")
+        rejected[ticker] = f"prob {entry.get('prob')!r}"
         continue
     if not is_valid_price(entry.get("price")):
-        rejected.append(f"{ticker} (price {entry.get('price')!r})")
+        rejected[ticker] = f"price {entry.get('price')!r}"
         continue
-    recency_problem = asof_problem(entry.get("asof"), ticker)
+    recency_problem = asof_problem(entry.get("asof"), ticker, now=RUN_NOW)
     if recency_problem is not None:
-        rejected.append(f"{ticker} ({recency_problem})")
+        rejected[ticker] = recency_problem
         continue
     scout[ticker] = entry
 
 if rejected:
-    print(f"ATTENZIONE: segnali scartati: {'; '.join(sorted(rejected))}")
+    print("ATTENZIONE: segnali scartati: " + "; ".join(
+        f"{ticker} ({reason})" for ticker, reason in sorted(rejected.items())
+    ))
 
 # Fail-closed: senza un segnale valido e recente una posizione aperta non è
 # valutabile.
@@ -158,9 +168,12 @@ held_tickers = [
 ]
 unpriced = sorted(t for t in held_tickers if t not in scout)
 if unpriced:
+    details = ", ".join(
+        f"{ticker} ({rejected.get(ticker, 'segnale assente')})"
+        for ticker in unpriced
+    )
     abort(
-        "segnale assente, non finito o obsoleto per posizioni aperte: "
-        + ", ".join(unpriced)
+        "segnale non utilizzabile per posizioni aperte: " + details
         + ". Nessuna operazione eseguita, file di stato non modificato."
     )
 

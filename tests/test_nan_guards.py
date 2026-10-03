@@ -52,24 +52,30 @@ FEATURES = ["Returns", "SMA_10", "SMA_50", "RSI"]
 NAN = float("nan")
 INF = float("inf")
 
-# Istanti di riferimento fissi: la policy deve essere deterministica.
-# Estate (EDT): chiusura 16:00 ET = 20:00 UTC.
-SUMMER_MIDSESSION = datetime(2026, 7, 15, 17, 0, tzinfo=timezone.utc)
-SUMMER_AFTER_CLOSE = datetime(2026, 7, 15, 20, 15, tzinfo=timezone.utc)
-# Inverno (EST): chiusura 16:00 ET = 21:00 UTC.
-WINTER_CRON_2100 = datetime(2026, 12, 15, 21, 0, tzinfo=timezone.utc)
-
 
 def utc(year, month, day, hour=0, minute=0):
     return datetime(year, month, day, hour, minute, tzinfo=timezone.utc)
 
 
-def today_utc():
-    return datetime.now(timezone.utc).date()
+# Istanti di riferimento fissi: la policy deve essere deterministica e non
+# dipendere dall'ora in cui la suite viene eseguita.
+# Estate (EDT): chiusura 16:00 ET = 20:00 UTC, consolidata alle 20:15.
+SUMMER_MIDSESSION = utc(2026, 7, 15, 17, 0)
+SUMMER_CLOSE_MINUS_1 = utc(2026, 7, 15, 20, 14)
+SUMMER_AFTER_CLOSE = utc(2026, 7, 15, 20, 15)
+# Inverno (EST): chiusura 16:00 ET = 21:00 UTC, consolidata alle 21:15.
+WINTER_CRON_2100 = utc(2026, 12, 15, 21, 0)
+WINTER_CONSOLIDATED = utc(2026, 12, 15, 21, 15)
+
+# Riferimento usato da tutte le fixture: mercoledi', sessione USA aperta.
+REFERENCE_NOW = SUMMER_MIDSESSION
 
 
-def days_ago_text(days):
-    return (today_utc() - timedelta(days=days)).isoformat()
+def days_ago_text(days, reference=None):
+    """Data asof relativa all'istante di riferimento, non all'orologio reale."""
+    moment = reference or REFERENCE_NOW
+
+    return (moment.date() - timedelta(days=days)).isoformat()
 
 
 # -------------------------------------------------------------------------
@@ -165,6 +171,15 @@ import pandas as pd
 REPO_ROOT = sys.argv[1]
 sys.path.insert(0, REPO_ROOT)
 
+# Orologio fissato per il test: patchato su safe_state prima che main.py venga
+# eseguito, cosi' main.py riceve l'istante voluto senza backdoor nel codice.
+if len(sys.argv) > 2:
+    import datetime as _datetime
+    import safe_state as _safe_state
+
+    _FIXED_NOW = _datetime.datetime.fromisoformat(sys.argv[2])
+    _safe_state.utc_now = lambda: _FIXED_NOW
+
 
 def _frame(periods=400):
     index = pd.date_range("2025-01-01", periods=periods, freq="D")
@@ -220,12 +235,14 @@ runpy.run_path(REPO_ROOT + "/main.py", run_name="__main__")
 '''
 
 
-def run_main(state_payload, scout_payload):
+def run_main(state_payload, scout_payload, now=None):
     """
     Esegue main.py in una sandbox e riporta esito e stato finale.
 
     I payload possono essere dict (serializzati) o testo grezzo, per poter
-    scrivere NaN letterali che json.dumps rifiuterebbe.
+    scrivere NaN letterali che json.dumps rifiuterebbe. L'istante `now` viene
+    imposto a main.py tramite l'harness, per rendere deterministica la policy
+    di recency.
     """
     workdir = tempfile.mkdtemp(prefix="nanguard_")
 
@@ -256,8 +273,11 @@ def run_main(state_payload, scout_payload):
         environment["TELEGRAM_BOT_TOKEN"] = "dummy-token"
         environment["TELEGRAM_CHAT_ID"] = "dummy-chat"
 
+        command = [sys.executable, harness_path, REPO_ROOT]
+        command.append((now or REFERENCE_NOW).isoformat())
+
         completed = subprocess.run(
-            [sys.executable, harness_path, REPO_ROOT],
+            command,
             cwd=workdir,
             env=environment,
             capture_output=True,
@@ -569,26 +589,118 @@ def test_missing_columns_are_rejected():
 
 def test_missing_asof_is_rejected():
     for value in [None, "", 20260715, "2026-7-1", "ieri", "2026-07-15T00:00:00"]:
-        assert asof_problem(value, "NVDA") is not None, value
+        assert asof_problem(value, "NVDA", now=REFERENCE_NOW) is not None, value
 
 
 def test_stale_asof_is_rejected():
-    assert asof_problem(days_ago_text(6), "NVDA") is not None
-    assert asof_problem(days_ago_text(5), "NVDA") is None
+    assert asof_problem(days_ago_text(6), "NVDA", now=REFERENCE_NOW) is not None
+    assert asof_problem(days_ago_text(5), "NVDA", now=REFERENCE_NOW) is None
 
-    assert asof_problem(days_ago_text(3), "BTC-USD") is not None
-    assert asof_problem(days_ago_text(2), "BTC-USD") is None
+    assert asof_problem(days_ago_text(3), "BTC-USD", now=REFERENCE_NOW) is not None
+    assert asof_problem(days_ago_text(2), "BTC-USD", now=REFERENCE_NOW) is None
 
 
 def test_future_asof_is_rejected():
-    problem = asof_problem(days_ago_text(-1), "NVDA")
+    problem = asof_problem(days_ago_text(-1), "NVDA", now=REFERENCE_NOW)
 
     assert problem is not None
     assert "futuro" in problem
 
 
 def test_asof_for_unmapped_ticker_is_rejected():
-    assert asof_problem(days_ago_text(1), "SOMETHING-NEW") is not None
+    assert asof_problem(
+        days_ago_text(1), "SOMETHING-NEW", now=REFERENCE_NOW
+    ) is not None
+
+
+def test_consumer_rejects_equity_asof_during_open_session():
+    # Payload esterno o alterato con la data di oggi a sessione aperta.
+    problem = asof_problem("2026-07-15", "NVDA", now=SUMMER_MIDSESSION)
+
+    assert problem is not None
+    assert "non ancora consolidata" in problem
+
+    # Il motivo deve distinguersi dall'obsolescenza.
+    assert "obsoleto" not in problem
+
+
+def test_consumer_equity_settlement_margin_boundary():
+    asof = "2026-07-15"
+
+    # 20:14 UTC: chiusura avvenuta ma margine di 15 minuti non trascorso.
+    assert asof_problem(asof, "NVDA", now=SUMMER_CLOSE_MINUS_1) is not None
+
+    # 20:15 UTC: consolidata.
+    assert asof_problem(asof, "NVDA", now=SUMMER_AFTER_CLOSE) is None
+
+
+def test_consumer_equity_margin_follows_dst():
+    asof = "2026-12-15"
+
+    # In inverno la chiusura e' alle 21:00 UTC: il cron delle 21:00 e' presto.
+    assert asof_problem(asof, "NVDA", now=WINTER_CRON_2100) is not None
+    assert asof_problem(asof, "NVDA", now=utc(2026, 12, 15, 21, 14)) is not None
+    assert asof_problem(asof, "NVDA", now=WINTER_CONSOLIDATED) is None
+
+
+def test_consumer_rejects_crypto_asof_before_utc_close():
+    asof = "2026-07-15"
+
+    # Giornata UTC ancora in corso.
+    assert asof_problem(asof, "BTC-USD", now=utc(2026, 7, 15, 17, 0)) is not None
+    assert asof_problem(asof, "BTC-USD", now=utc(2026, 7, 15, 23, 59)) is not None
+
+    # Mezzanotte UTC passata ma margine non trascorso.
+    assert asof_problem(asof, "BTC-USD", now=utc(2026, 7, 16, 0, 14)) is not None
+
+    # Consolidata.
+    assert asof_problem(asof, "BTC-USD", now=utc(2026, 7, 16, 0, 15)) is None
+
+
+def test_crypto_and_equity_differ_at_the_same_instant():
+    # Stessa data, stesso istante: l'azione e' consolidata, il crypto no.
+    moment = utc(2026, 7, 15, 20, 15)
+
+    assert asof_problem("2026-07-15", "NVDA", now=moment) is None
+    assert asof_problem("2026-07-15", "BTC-USD", now=moment) is not None
+
+
+def test_producer_output_always_passes_the_consumer_gate():
+    """La barra scelta dal producer deve essere autorizzata dal consumer."""
+    instants = [
+        SUMMER_MIDSESSION,
+        SUMMER_CLOSE_MINUS_1,
+        SUMMER_AFTER_CLOSE,
+        WINTER_CRON_2100,
+        WINTER_CONSOLIDATED,
+        utc(2026, 7, 16, 0, 10),
+        utc(2026, 7, 16, 0, 20),
+    ]
+
+    checked = 0
+
+    for moment in instants:
+        for ticker, zone in [
+            ("NVDA", "America/New_York"),
+            ("BTC-USD", "UTC"),
+        ]:
+            frame = make_frame(moment.date(), periods=10, zone=zone)
+
+            label, row, rejection = select_signal_bar(
+                frame, FEATURES, ticker, now=moment
+            )
+
+            if rejection is not None:
+                continue
+
+            problem = asof_problem(
+                to_bar_date_text(label), ticker, now=moment
+            )
+
+            assert problem is None, (ticker, moment.isoformat(), problem)
+            checked += 1
+
+    assert checked > 0
 
 
 # =========================================================================
@@ -627,7 +739,9 @@ def test_scout_payload_validation():
     assert validate_scout_payload({}) == ["il payload scout e' vuoto"]
     assert validate_scout_payload([]) != []
 
-    assert validate_scout_payload({"TSLA": scout_entry(0.42, 300.0)}) == []
+    assert validate_scout_payload(
+        {"TSLA": scout_entry(0.42, 300.0)}, now=REFERENCE_NOW
+    ) == []
 
     for entry in [
         {"prob": 0.42, "price": NAN, "asof": days_ago_text(1)},
@@ -641,8 +755,12 @@ def test_scout_payload_validation():
         {"prob": 0.42, "price": 300.0, "asof": 7},
         {"prob": 0.42, "price": 300.0, "asof": days_ago_text(30)},
         {"prob": 0.42, "price": 300.0, "asof": days_ago_text(-2)},
+        # Data di oggi con sessione ancora aperta.
+        {"prob": 0.42, "price": 300.0, "asof": days_ago_text(0)},
     ]:
-        assert validate_scout_payload({"TSLA": entry}), entry
+        assert validate_scout_payload(
+            {"TSLA": entry}, now=REFERENCE_NOW
+        ), entry
 
 
 def test_state_payload_requires_every_field():
@@ -941,6 +1059,69 @@ def test_held_position_with_stale_asof_aborts():
     assert "obsoleto" in result["stderr"]
     assert result["unchanged"]
     assert not result["telegram_sent"]
+
+
+def test_held_position_with_unconsolidated_asof_aborts():
+    """asof di oggi mentre la sessione USA e' ancora aperta: fail-closed."""
+    state = complete_state(
+        cash=500.0,
+        day_start_val=3500.0,
+        positions={
+            "TSLA": {
+                "qty": 10.0,
+                "entry_price": 300.0,
+                "peak_price": 350.0
+            }
+        }
+    )
+
+    scout = {
+        "TSLA": scout_entry(0.60, 310.0, days_ago=0),
+        "GLD": scout_entry(0.75, 250.0)
+    }
+
+    result = run_main(state, scout, now=SUMMER_MIDSESSION)
+
+    assert result["returncode"] != 0
+    assert "TSLA" in result["stderr"]
+    assert "non ancora consolidata" in result["stderr"]
+    assert result["unchanged"]
+    assert not result["telegram_sent"]
+
+
+def test_candidate_with_unconsolidated_asof_is_skipped():
+    scout = {
+        # Supererebbe la soglia, ma la sessione di oggi e' ancora aperta.
+        "GLD": scout_entry(0.75, 250.0, days_ago=0),
+        "QQQ": scout_entry(0.70, 500.0)
+    }
+
+    result = run_main(complete_state(), scout, now=SUMMER_MIDSESSION)
+
+    assert result["returncode"] == 0, result["stderr"]
+    assert "non ancora consolidata" in result["stdout"]
+
+    persisted = json.loads(result["state_after"])
+
+    assert validate_state_payload(persisted) == []
+    assert "GLD" not in persisted["positions"]
+    assert "QQQ" in persisted["positions"]
+
+
+def test_todays_equity_asof_is_accepted_once_settled():
+    scout = {"GLD": scout_entry(0.75, 250.0, days_ago=0)}
+
+    # 20:14 UTC: ancora rifiutato, nessun ingresso.
+    early = run_main(complete_state(), scout, now=SUMMER_CLOSE_MINUS_1)
+
+    assert early["returncode"] == 0, early["stderr"]
+    assert "GLD" not in json.loads(early["state_after"])["positions"]
+
+    # 20:15 UTC: consolidato, ingresso consentito.
+    settled = run_main(complete_state(), scout, now=SUMMER_AFTER_CLOSE)
+
+    assert settled["returncode"] == 0, settled["stderr"]
+    assert "GLD" in json.loads(settled["state_after"])["positions"]
 
 
 def test_candidate_with_stale_asof_is_skipped_but_run_completes():
