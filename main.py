@@ -6,6 +6,17 @@ import requests
 import yfinance as yf
 import pandas as pd
 
+from safe_state import (
+    asof_problem,
+    dump_json_atomic,
+    is_finite_number,
+    is_valid_cash,
+    is_valid_price,
+    is_valid_probability,
+    utc_now,
+    validate_state_payload
+)
+
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
@@ -15,6 +26,17 @@ if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
 
 STATE_FILE = "portfolio_state.json"
 SCOUT_FILE = "scout_signals.json"
+
+# Istante unico di riferimento: tutti i segnali vengono valutati contro lo
+# stesso momento, altrimenti ticker diversi potrebbero cadere ai due lati del
+# margine di consolidamento.
+RUN_NOW = utc_now()
+
+def abort(message):
+    """Interrompe il run senza toccare lo stato persistito."""
+    # Messaggio in ASCII: lo stdout del runner non e' garantito UTF-8.
+    print(f"ABORT: {message}", file=sys.stderr)
+    sys.exit(1)
 
 def get_atr(ticker, period=14):
     """Calcola l'ATR in dollari per un dato ticker."""
@@ -31,6 +53,9 @@ def get_atr(ticker, period=14):
         atr_val = tr.rolling(window=period).mean().iloc[-1]
         if isinstance(atr_val, pd.Series):
             atr_val = atr_val.item()
+        if not is_valid_price(atr_val):
+            print(f"ATR non valido per {ticker} ({atr_val!r}): uso fallback percentuale.")
+            return None
         return float(atr_val)
     except Exception as e:
         print(f"Errore calcolo ATR per {ticker}: {e}")
@@ -61,28 +86,96 @@ def check_macro_filter():
         return True, "Errore calcolo SPY (Fallback: OK)"
 
 # Caricamento Stato Portafoglio
-state = {
+# I default valgono SOLO se il file non esiste. Uno stato esistente non viene
+# mai completato o corretto con i default: un file vuoto o parziale sarebbe un
+# reset silenzioso del portafoglio e distruggerebbe l'unica evidenza.
+DEFAULT_STATE = {
     "cash": 10000.0, 
     "positions": {}, 
     "initial_balance": 10000.0,
     "day_start_val": 10000.0,
     "last_run_date": ""
 }
+
 if os.path.exists(STATE_FILE):
+    loaded_state = None
     try:
         with open(STATE_FILE, "r") as f:
-            state.update(json.load(f))
+            loaded_state = json.load(f)
     except Exception as e:
-        print(f"Errore lettura stato: {e}")
+        abort(f"stato non leggibile ({e}). File non modificato.")
+
+    if not isinstance(loaded_state, dict):
+        abort("stato: il payload non è un oggetto JSON. File non modificato.")
+
+    state_problems = validate_state_payload(loaded_state, require_complete=True)
+    if state_problems:
+        abort(
+            "stato corrotto o incompleto: " + "; ".join(state_problems)
+            + ". Nessuna operazione eseguita, file non modificato."
+        )
+
+    state = loaded_state
+else:
+    print(f"{STATE_FILE} assente: inizializzazione dallo stato di default.")
+    state = dict(DEFAULT_STATE)
 
 # Caricamento Segnali Scout
+if not os.path.exists(SCOUT_FILE):
+    abort(f"{SCOUT_FILE} assente: nessun segnale su cui operare.")
+
+try:
+    with open(SCOUT_FILE, "r") as f:
+        raw_scout = json.load(f)
+except Exception as e:
+    abort(f"segnali scout non leggibili ({e}). File di stato non modificato.")
+
+if not isinstance(raw_scout, dict):
+    abort("segnali scout: il payload non è un oggetto JSON.")
+
+# Dati non finiti e barre non autorizzate dalla policy di recency vengono
+# scartati qui, prima di entrare in qualunque calcolo di cassa o equity.
+# asof_problem riapplica la policy completa del producer: non ci si fida del
+# fatto che il payload sia stato prodotto da model_engine.py.
 scout = {}
-if os.path.exists(SCOUT_FILE):
-    try:
-        with open(SCOUT_FILE, "r") as f:
-            scout = json.load(f)
-    except Exception as e:
-        print(f"Errore lettura scout: {e}")
+rejected = {}
+for ticker, entry in raw_scout.items():
+    if not isinstance(entry, dict):
+        rejected[ticker] = "voce non valida"
+        continue
+    if not is_valid_probability(entry.get("prob")):
+        rejected[ticker] = f"prob {entry.get('prob')!r}"
+        continue
+    if not is_valid_price(entry.get("price")):
+        rejected[ticker] = f"price {entry.get('price')!r}"
+        continue
+    recency_problem = asof_problem(entry.get("asof"), ticker, now=RUN_NOW)
+    if recency_problem is not None:
+        rejected[ticker] = recency_problem
+        continue
+    scout[ticker] = entry
+
+if rejected:
+    print("ATTENZIONE: segnali scartati: " + "; ".join(
+        f"{ticker} ({reason})" for ticker, reason in sorted(rejected.items())
+    ))
+
+# Fail-closed: senza un segnale valido e recente una posizione aperta non è
+# valutabile.
+held_tickers = [
+    ticker for ticker, pos in state.get("positions", {}).items()
+    if isinstance(pos, dict)
+]
+unpriced = sorted(t for t in held_tickers if t not in scout)
+if unpriced:
+    details = ", ".join(
+        f"{ticker} ({rejected.get(ticker, 'segnale assente')})"
+        for ticker in unpriced
+    )
+    abort(
+        "segnale non utilizzabile per posizioni aperte: " + details
+        + ". Nessuna operazione eseguita, file di stato non modificato."
+    )
 
 ranked = sorted(scout.items(), key=lambda x: x[1].get('prob', 0), reverse=True)
 top_candidates = [ticker for ticker, data in ranked if data.get('prob', 0) > 0.55][:5]
@@ -97,11 +190,12 @@ for ticker, pos in state.get("positions", {}).items():
     if not isinstance(pos, dict):
         continue
         
-    curr_price = scout.get(ticker, {}).get("price", pos.get("entry_price", 1.0))
+    # I prezzi delle posizioni aperte sono già stati validati sopra.
+    curr_price = float(scout[ticker]["price"])
     entry_price = pos.get("entry_price", curr_price)
     peak_price = max(pos.get("peak_price", curr_price), curr_price)
     qty = pos.get("qty", 0.0)
-    prob = scout.get(ticker, {}).get("prob", 0.5)
+    prob = scout[ticker].get("prob", 0.5)
     
     if qty <= 0:
         continue
@@ -138,6 +232,9 @@ for ticker, pos in state.get("positions", {}).items():
             "peak_price": peak_price
         }
 
+if not is_valid_cash(current_cash):
+    abort(f"cassa non valida dopo la gestione posizioni ({current_cash!r}).")
+
 state["cash"] = current_cash
 state["positions"] = updated_positions
 
@@ -147,6 +244,9 @@ total_portfolio_val = state["cash"] + sum(
     for t, pos in state["positions"].items()
 )
 
+if not is_finite_number(total_portfolio_val):
+    abort(f"equity di portafoglio non finita ({total_portfolio_val!r}).")
+
 # Gestione tracciamento valore di inizio giornata
 today_str = datetime.utcnow().strftime("%Y-%m-%d")
 if state.get("last_run_date") != today_str:
@@ -154,6 +254,10 @@ if state.get("last_run_date") != today_str:
     state["last_run_date"] = today_str
 
 day_start_val = state.get("day_start_val", total_portfolio_val)
+
+if not is_valid_price(day_start_val):
+    abort(f"day_start_val non utilizzabile ({day_start_val!r}).")
+
 daily_drawdown = ((total_portfolio_val - day_start_val) / day_start_val) * 100
 
 # 2. VERIFICA CONTROLLI DI RISCHIO MACRO E CIRCUIT BREAKER
@@ -208,10 +312,25 @@ for ticker, data in scout.items():
         pos_report.append(f"⚪ {ticker}: CASH (Prob: {data.get('prob',0)*100:.1f}% | ${data.get('price',0):.2f})")
 
 initial_bal = float(state.get("initial_balance", 10000.0))
+
+if not is_valid_price(initial_bal):
+    abort(f"initial_balance non utilizzabile ({initial_bal!r}).")
+
 pnl_tot = ((total_portfolio_val - initial_bal) / initial_bal) * 100
 
-with open(STATE_FILE, "w") as f:
-    json.dump(state, f, indent=4)
+# Persistenza: il nuovo stato viene validato e serializzato per intero prima di
+# sostituire il file, che non viene mai aperto in troncamento.
+new_state_problems = validate_state_payload(state)
+if new_state_problems:
+    abort(
+        "nuovo stato non valido: " + "; ".join(new_state_problems)
+        + ". File di stato non modificato."
+    )
+
+try:
+    dump_json_atomic(STATE_FILE, state)
+except ValueError as e:
+    abort(f"serializzazione stato rifiutata ({e}). File di stato non modificato.")
 
 msg = f"🤖 REPORT AGENTE SCOUT (18 ASSET)\n\n"
 msg += "\n".join(pos_report) + "\n\n"

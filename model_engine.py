@@ -1,4 +1,4 @@
-import json
+import sys
 
 import numpy as np
 import pandas as pd
@@ -8,6 +8,17 @@ from lightgbm import LGBMClassifier
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, brier_score_loss, log_loss
 from xgboost import XGBClassifier
+
+from safe_state import (
+    dump_json_atomic,
+    is_valid_price,
+    is_valid_probability,
+    select_signal_bar,
+    to_bar_date_text,
+    utc_now,
+    validate_metrics_payload,
+    validate_scout_payload
+)
 
 
 SCOUT_POOL = [
@@ -214,7 +225,12 @@ def train_final_models(X, y):
     return models
 
 
-def run_scout_and_train():
+def run_scout_and_train(now=None):
+
+    # Un solo istante di riferimento per tutto il run: la policy di recency
+    # deve essere deterministica e riproducibile nei test.
+    if now is None:
+        now = utc_now()
 
     scout_results = {}
     validation_results = {}
@@ -304,17 +320,23 @@ def run_scout_and_train():
                 y
             )
 
-            df_features = df.dropna(
-                subset=FEATURES
+            # Feature, probabilita', prezzo e asof devono venire dalla stessa
+            # barra, scelta dalla policy di recency.
+            asof, last_row, rejection = select_signal_bar(
+                df,
+                FEATURES,
+                ticker,
+                now=now
             )
 
-            if df_features.empty:
+            if last_row is None:
+                print(
+                    f"{ticker}: segnale non generato "
+                    f"({rejection})."
+                )
                 continue
 
-            last_features = (
-                df_features[FEATURES]
-                .iloc[[-1]]
-            )
+            last_features = last_row[FEATURES]
 
             current_probabilities = []
 
@@ -333,12 +355,27 @@ def run_scout_and_train():
             )
 
             last_price = float(
-                df["Close"].iloc[-1]
+                last_row["Close"].iloc[0]
             )
+
+            if not is_valid_probability(current_probability):
+                print(
+                    f"{ticker}: probabilita' non valida "
+                    f"({current_probability!r}), segnale scartato."
+                )
+                continue
+
+            if not is_valid_price(last_price):
+                print(
+                    f"{ticker}: prezzo non valido "
+                    f"({last_price!r}), segnale scartato."
+                )
+                continue
 
             scout_results[ticker] = {
                 "prob": current_probability,
-                "price": last_price
+                "price": last_price,
+                "asof": to_bar_date_text(asof)
             }
 
             print(
@@ -353,34 +390,50 @@ def run_scout_and_train():
             )
 
     # ---------------------------------------------------------
+    # VALIDAZIONE PAYLOAD
+    #
+    # Nessun file viene toccato se i dati non sono utilizzabili:
+    # meglio nessun segnale che un segnale corrotto.
+    # ---------------------------------------------------------
+
+    scout_problems = validate_scout_payload(
+        scout_results,
+        now=now
+    )
+
+    if scout_problems:
+        raise ValueError(
+            "payload segnali non valido: "
+            + "; ".join(scout_problems)
+        )
+
+    report_problems = validate_metrics_payload(
+        validation_results
+    )
+
+    if report_problems:
+        raise ValueError(
+            "report walk-forward non valido: "
+            + "; ".join(report_problems)
+        )
+
+    # ---------------------------------------------------------
     # SEGNALI CORRENTI
     # ---------------------------------------------------------
 
-    with open(
+    dump_json_atomic(
         "scout_signals.json",
-        "w"
-    ) as f:
-
-        json.dump(
-            scout_results,
-            f,
-            indent=4
-        )
+        scout_results
+    )
 
     # ---------------------------------------------------------
     # REPORT WALK-FORWARD
     # ---------------------------------------------------------
 
-    with open(
+    dump_json_atomic(
         "ml_validation_report.json",
-        "w"
-    ) as f:
-
-        json.dump(
-            validation_results,
-            f,
-            indent=4
-        )
+        validation_results
+    )
 
     print(
         "\n========================================"
@@ -402,4 +455,14 @@ def run_scout_and_train():
 
 
 if __name__ == "__main__":
-    run_scout_and_train()
+
+    try:
+        run_scout_and_train()
+
+    except Exception as error:
+
+        print(
+            f"ABORT model_engine: {error}"
+        )
+
+        sys.exit(1)
