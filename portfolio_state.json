@@ -1,5 +1,5 @@
 {
-    "cash": NaN,
+    "cash": 6462.649979109016,
     "positions": {
         "PLTR": {
             "qty": 1.940049723741483,
@@ -18,7 +18,7 @@
         }
     },
     "initial_balance": 10000.0,
-    "day_start_val": NaN,
-    "last_run_date": "2026-09-30",
+    "day_start_val": 10600.891084634755,
+    "last_run_date": "2026-09-29",
     "initial_capital": 10000.0
 }
