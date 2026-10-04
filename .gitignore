@@ -1,0 +1,24 @@
+# Bytecode e cache dell'interprete Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Ambienti virtuali locali
+.venv/
+venv/
+env/
+
+# Cache degli strumenti di sviluppo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Artefatti di packaging
+*.egg-info/
+build/
+dist/
+
+# Configurazione locale con credenziali
+.env
