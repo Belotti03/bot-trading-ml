@@ -4,8 +4,34 @@
 
 NaN incident closed. V1 cron resumed. V2 research **plan** version 4
 adopted 2026-10-06 after audit 004 APPROVED. Not an executable protocol.
-No candidate before the 0A–0C freeze. R0.1 is authorised as forensic
-work, independent of Phase 0A.
+No candidate before the 0A–0C freeze. R0.1 forensic ledger is in
+`docs/R01_PROVENANCE.md`.
+
+### Mandates closed 2026-10-06 by Filippo
+
+Recorded as owner decisions, not as statistical results.
+
+- D13: long-only, no leverage, spot crypto only, base EUR.
+- D14: max drawdown 25% hard gate; 15% annualised vol target; 20% max
+  single-asset weight.
+- D1: **Branch B** is the current universe. The 18 tickers are a
+  declared case study. H1 is off. Results are not generalisable beyond
+  this basket. Switching to Branch A requires a new audit.
+- D15 (with D1): Yahoo with pinned snapshots for Branch B. No paid
+  survivorship-free vendor is committed.
+- D12: estimand is excess net Sharpe versus the primary comparator.
+- D17: only Filippo may reveal the confirmatory shadow; Claude may not
+  peek. Calendar cut-off date still to freeze with 0C windows.
+- D22: 70% US equities / 20% crypto / 10% ETF-commodity, quarterly.
+- D24: legacy results are hypotheses only, not evidence.
+- D26: daily bars.
+- D27: next-open horizon, independent of V1's 1-day ML target.
+- D28: cash equities, QQQ, GLD, spot crypto; no futures/options.
+
+0A mandate gates D12–D14, D17, D24, D26–D28 are closed. D1, D15, D22
+are also closed. Remaining before 0C: 0B methodology (snapshots, lock,
+flags, costs model details, D2–D4, D16, D18, D21, D23) and 0C
+statistics (power, trials, thresholds).
 
 ### V2 roadmap: two audits, verdicts v1 APPROVED WITH CHANGES, v2 REJECTED
 

@@ -474,53 +474,37 @@ into D5. Peeking policy is folded into D17.
 ### Mandates, owner Filippo
 
 **D12. Estimand and primary economic objective.**
-*Proposal:* expected annualised net Sharpe of the strategy's return in
-excess of its pre-registered primary comparator, after measured costs.
-Objective: maximise risk-adjusted net return subject to the risk
-mandate. *Alternatives:* total return; Calmar; utility-based certainty
-equivalent. *Close by:* 0A. *If unresolved:* no gate can be defined.
+**CLOSED 2026-10-06 by Filippo:** expected annualised net Sharpe versus
+the pre-registered primary comparator, after measured costs. Objective:
+maximise risk-adjusted net return subject to the risk mandate.
 
 **D13. Long-only, leverage, base currency.**
-*Proposal:* long-only, no leverage, spot crypto only, base currency EUR
-to match V1. *Alternatives:* allow shorting in the equity sleeve; modest
-leverage for volatility targeting; USD base. *Close by:* 0A.
-*If unresolved:* universe, sizing and cost model are undefined.
+**CLOSED 2026-10-06 by Filippo:** long-only, no leverage, spot crypto
+only, base EUR.
 
 **D14. Risk budget.**
-*Proposal:* maximum drawdown 25% as a hard gate, annualised volatility
-target 15%, maximum single-asset weight 20%, cluster limits at the risk
-layer. Numbers are a mandate, not a statistical result. *Alternatives:*
-a tighter 20%/10% pair; drawdown as a soft constraint with a recovery
-rule. *Close by:* 0A. *If unresolved:* §7.1 has no content.
+**CLOSED 2026-10-06 by Filippo:** maximum drawdown 25% as a hard gate,
+annualised volatility target 15%, maximum single-asset weight 20%,
+cluster limits at the risk layer.
 
 **D15. Data provider, version, licence.**
-*Proposal:* if Branch B is chosen, Yahoo with pinned immutable
-snapshots. A paid survivorship-free vendor is evaluated **after** the
-branch is recorded, as a possible later switch to A, which requires a
-new audit. D15 and D1 close together in 0B. 0C does not start while the
-vendor question is still the branch question. *Alternatives:* commit to
-a paid vendor now and choose A; stay on Yahoo and accept B as final.
-*Close by:* 0B. *If unresolved:* 0C cannot start.
+**CLOSED 2026-10-06 with D1:** Yahoo with pinned immutable snapshots.
+No paid survivorship-free vendor is committed. A later switch to
+Branch A is a new decision and a new audit.
 
 **D17. Development cut-off, reveal authority, peeking.**
-*Proposal:* development data ends at a date frozen in 0A. The
-confirmatory reveal is authorised by Filippo only, once per candidate,
-recorded in an append-only ledger. Claude may not reveal. Peeking on
-the confirmatory shadow cohort is sealed: no live metric, no equity
-curve, no trade blotter is shown to Claude or used for any decision
-until Filippo reveals. Development paper runs may be inspected; they
-are not confirmatory. *Alternatives:* automatic reveal on completing
-pre-registration. *Close by:* 0A. *If unresolved:* no confirmatory
-evidence can exist.
+**CLOSED 2026-10-06 by Filippo:** confirmatory reveal authorised by
+Filippo only, once per candidate, append-only ledger. Claude may not
+reveal. Confirmatory shadow peeking sealed until that reveal.
+Development data cut-off date remains to be frozen when 0C defines the
+windows; the authority is closed, the calendar date is not.
 
 **D1. Branch choice.**
-*Proposal:* in 0B choose **A or B**. Recommended default: **B**,
-recorded as the current branch, H1 off, with a pre-registered review
-date (proposed: twelve months after the 0B close, or on completing a
-vendor contract, whichever comes first). Switching to A is a new
-decision and a new audit. **Forbidden:** start 0C "while the vendor is
-being evaluated". *Alternatives:* block everything until A is funded;
-abandon A permanently. *Close by:* 0B. *If unresolved:* 0C cannot start.
+**CLOSED 2026-10-06 by Filippo:** **Branch B**, current universe. H1
+off. Pre-registered review date: twelve months from this close, or
+sooner if Filippo opens a vendor decision. Switching to A is a new
+audit. 0C must not start on an unrecorded branch; the branch is now
+recorded.
 
 ### Methodology, owner Claude plus audit
 
@@ -647,16 +631,10 @@ volatility-matched benchmark; MSTR-like crypto exposure is governed by
 D4 plus cluster limits. *Close by:* 0B.
 
 **D22. Calendar synchronisation and capital allocation.**
-*Proposal:* sleeves keep native calendars with their own `q`;
-portfolio-level metrics on the intersection of trading days; crypto
-positions held unchanged on equity-closed days with no synthetic
-returns. Capital split, proposed, owner Filippo: **70% US equities /
-20% crypto / 10% ETF and commodity**, applied to the D12 estimand at
-the portfolio level, **rebalanced quarterly** on the same dates as the
-D2 universe rebalance, with no intra-quarter drift targeting.
-Alternatives: 60/30/10; 80/10/10; equal sleeve weights; monthly
-rebalance of the split. *Close by:* 0B. *If unresolved:* no
-portfolio-level metric is well defined.
+**CLOSED 2026-10-06 by Filippo:** native calendars; portfolio metrics on
+the intersection of trading days; crypto unchanged on equity-closed
+days, no synthetic returns. Capital split **70% US equities / 20%
+crypto / 10% ETF and commodity**, rebalanced quarterly.
 
 **D23. Dependency lock.**
 *Proposal:* exact pins plus a lock file committed to the repository;
@@ -664,11 +642,9 @@ the workflow installs from the lock; interpreter and library versions
 recorded in every result. *Close by:* 0B.
 
 **D24. Permitted use of legacy results.**
-*Proposal:* legacy artefacts may be used **only** to generate
-hypotheses and to design the protocol, never as evidence. That use is
-recorded in the contamination map and counted conservatively in DSR.
-Each artefact is admitted or excluded individually by R0.1.
-*Close by:* 0A.
+**CLOSED 2026-10-06 by Filippo:** legacy artefacts may generate
+hypotheses and help design the protocol, never as evidence. Counted
+conservatively in DSR. Individual admission via R0.1.
 
 **D25. Sufficient breadth for H1.**
 *Proposal:* H1 requires a pre-registered minimum number of eligible
@@ -677,21 +653,17 @@ majority of the test period, numbers set in 0C. Below that, H1 is not
 run. Under Branch B it is not run, without caveat. *Close by:* 0C.
 
 **D26. Timeframe.**
-*Proposal:* daily bars, inherited from V1, declared rather than
-assumed. Intraday is out of scope for V2. *Close by:* 0A.
+**CLOSED 2026-10-06 by Filippo:** daily bars. Intraday out of scope.
 
 **D27. Signal horizon.**
-*Proposal:* the V2 research horizon is declared independently of V1's
-1-day ML target. Default for the first families: next-open to next-open
-holding of at least one session, with the exact horizon on each
-pre-registration card. V1's 1-day target remains a characterisation
-target in Phase 2, not the V2 default. *Close by:* 0A.
+**CLOSED 2026-10-06 by Filippo:** V2 horizon independent of V1's 1-day
+ML target. First families: next-open to next-open, at least one
+session; exact horizon on each pre-registration card.
 
 **D28. Instruments in scope.**
-*Proposal:* cash equities, the listed ETFs in the current basket (QQQ,
-GLD) under Branch B, and spot crypto. No futures, no options, no
-leveraged or inverse ETFs, no OTC. Under Branch A the same instrument
-classes apply inside the point-in-time universe. *Close by:* 0A.
+**CLOSED 2026-10-06 by Filippo:** cash equities, QQQ and GLD in the
+Branch B basket, spot crypto. No futures, options, leveraged or inverse
+ETFs, or OTC.
 
 ### Reclassified
 
