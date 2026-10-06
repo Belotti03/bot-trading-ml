@@ -1,19 +1,19 @@
 {
     "BTC-USD": {
-        "samples": 561,
-        "positive_rate": 0.49732620320855614,
-        "predicted_positive_rate": 0.5543672014260249,
-        "accuracy": 0.48663101604278075,
-        "brier_score": 0.26602356381880543,
-        "log_loss": 0.7273655007565447
+        "samples": 560,
+        "positive_rate": 0.49642857142857144,
+        "predicted_positive_rate": 0.49642857142857144,
+        "accuracy": 0.46785714285714286,
+        "brier_score": 0.26946485917665663,
+        "log_loss": 0.7344953257735463
     },
     "ETH-USD": {
-        "samples": 561,
-        "positive_rate": 0.5133689839572193,
-        "predicted_positive_rate": 0.5525846702317291,
-        "accuracy": 0.5044563279857398,
-        "brier_score": 0.26177344918714335,
-        "log_loss": 0.7182128796335748
+        "samples": 560,
+        "positive_rate": 0.5125,
+        "predicted_positive_rate": 0.5410714285714285,
+        "accuracy": 0.49642857142857144,
+        "brier_score": 0.2633206762596605,
+        "log_loss": 0.7215760596708151
     },
     "NVDA": {
         "samples": 330,
@@ -106,10 +106,10 @@
     "GOOGL": {
         "samples": 330,
         "positive_rate": 0.5242424242424243,
-        "predicted_positive_rate": 0.39090909090909093,
-        "accuracy": 0.4909090909090909,
-        "brier_score": 0.2747112743705158,
-        "log_loss": 0.7475747791911603
+        "predicted_positive_rate": 0.3939393939393939,
+        "accuracy": 0.49393939393939396,
+        "brier_score": 0.2747827526605157,
+        "log_loss": 0.7477566958576206
     },
     "AAPL": {
         "samples": 330,
