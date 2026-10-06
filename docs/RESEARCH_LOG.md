@@ -27,11 +27,28 @@ Recorded as owner decisions, not as statistical results.
 - D26: daily bars.
 - D27: next-open horizon, independent of V1's 1-day ML target.
 - D28: cash equities, QQQ, GLD, spot crypto; no futures/options.
+- D16: AdjClose for signals and performance; raw Close/Open for
+  execution; `auto_adjust` never implicit.
+- D3: max history per asset, unbalanced panel; equal weight inside a
+  sleeve; sleeve weights from D22; every cross-section also reported
+  on the common-period subsample.
+- D2: under Branch B, three sleeves as D22; quarterly *capital*
+  rebalance; the 18 names stay fixed. Seasoning and liquidity filters
+  are on file for Branch A only.
+- D4: not applied under Branch B. The 18 names are not dropped by
+  eligibility filters.
+- D18: next-open fills; per-side cost = commission + spread + linear
+  impact × participation. Three scenarios (cheap/base/expensive).
+  Formula frozen; numbers freeze in 0C. Evidence path fail-closed
+  until then.
+- D21: no investable ticker may be the official benchmark. QQQ stays
+  in the 18 as an instrument and is therefore forbidden as benchmark.
+  MSTR stays; crypto-cluster concentration is reported, not filtered.
 
-0A mandate gates D12–D14, D17, D24, D26–D28 are closed. D1, D15, D22
-are also closed. Remaining before 0C: 0B methodology (snapshots, lock,
-flags, costs model details, D2–D4, D16, D18, D21, D23) and 0C
-statistics (power, trials, thresholds).
+0A gates and 0B decisions D1–D4, D12–D18, D21–D22, D24, D26–D28 are
+closed. Remaining before 0C: live wiring to snapshots (separate check),
+D23 lock-file completeness, D18 scenario *numbers*, then 0C statistics
+(power, trials, thresholds).
 
 ### Phase 0B first slice — 2026-10-06
 
@@ -93,6 +110,18 @@ exchange holiday). `invalid_ohlc` still 0. Volume suspects unchanged
 (AMD 2, AAPL 1). Half-days remain expected daily bars.
 
 Still open in 0B: live wiring to snapshots, D2–D4, D16-in-V1, D18, D21.
+
+### Phase 0B fourth slice — D16/D18/D2/D21 code + mandates — 2026-10-06
+
+Filippo accepted the recommended closes. Research-only. Not wired to
+live V1. D16 is **not** applied inside V1 feature code.
+
+Delivered:
+
+- Mandates D2, D3, D4-under-B, D16, D18 (model), D21 recorded above.
+- `research/prices.py`: AdjClose returns; next-open fill from raw Open.
+- `research/costs.py`: cost formula; evidence blocked until 0C numbers.
+- `research/sleeves.py`: 70/20/10 map; QQQ illegal as benchmark.
 
 ### V2 roadmap: two audits, verdicts v1 APPROVED WITH CHANGES, v2 REJECTED
 

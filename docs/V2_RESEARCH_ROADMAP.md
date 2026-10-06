@@ -509,20 +509,23 @@ recorded.
 ### Methodology, owner Claude plus audit
 
 **D2. Sleeves and rebalance frequency.**
-*Proposal:* three sleeves, US equities, ETF and commodity, crypto;
-quarterly universe rebalance; minimum listing age 252 trading days;
-liquidity filter on trailing 60-day median traded value, threshold set
-in 0C before any candidate. *Alternatives:* monthly rebalance; two
-sleeves. *Close by:* 0B.
+**CLOSED 2026-10-06 by Filippo:** under Branch B, three sleeves as D22
+(US equities / crypto / ETF-commodity). Quarterly **capital** rebalance.
+The 18 names stay fixed; there is no universe reconstitution. Seasoning
+(252 days) and trailing-60-day liquidity filters remain specified for
+Branch A only and are not applied now.
 
 **D3. History span and panel weighting.**
-*Proposal:* maximum available history per asset; unbalanced panel;
-assets weighted equally within a sleeve and sleeves weighted by D22;
-every cross-sectional claim also reported on the common-period
-subsample. *Close by:* 0B.
+**CLOSED 2026-10-06 by Filippo:** maximum available history per asset;
+unbalanced panel; equal weight inside a sleeve; sleeve weights from
+D22; every cross-sectional claim also reported on the common-period
+subsample.
 
 **D4. Eligibility, including MSTR-like objects.**
-*Proposal:* these filters apply to **Branch A only**. Under Branch B
+**CLOSED 2026-10-06 by Filippo:** not applied under Branch B. The 18
+tickers are a fixed basket and are not silently dropped. The Branch A
+filter list below stays on file for a future branch switch (new audit).
+*Proposal (Branch A only):* these filters apply to **Branch A only**. Under Branch B
 the 18 tickers are a fixed basket; D4 is not applied and does not
 silently drop names. No ex-post special case and no break detection.
 At every Branch A rebalance date, every asset must satisfy **all** of:
@@ -542,9 +545,9 @@ At every Branch A rebalance date, every asset must satisfy **all** of:
 
 Delistings remain in the panel with their delisting return. Failed
 eligibility drops the asset from the *new* cohort only.
-*Alternatives:* a pre-registered break-detection rule; manual MSTR
-exclusion, which is snooping and is not recommended.
-*Close by:* 0B. *If unresolved:* the universe cannot be constructed.
+*Not in force under Branch B.*
+*Alternatives (Branch A):* a pre-registered break-detection rule; manual
+MSTR exclusion, which is snooping and is not recommended.
 
 **D5. Trial definition and budget.**
 *Proposal:* one trial is one evaluation of a (hypothesis, parameter
@@ -601,15 +604,15 @@ frequency, replication count set in 0C. The **test** is the improving tail in §
 "outside quantile". *Close by:* 0C.
 
 **D16. Adjustment convention.**
-*Proposal:* split- and dividend-adjusted total return for signals and
-for performance; unadjusted close retained for execution; `auto_adjust`
-never left implicit. *Close by:* 0B.
+**CLOSED 2026-10-06 by Filippo:** split- and dividend-adjusted total
+return (`AdjClose`) for signals and for performance; unadjusted Close
+and Open for execution; `auto_adjust` never left implicit.
 
 **D18. Fill, slippage, capacity, market impact.**
-*Proposal:* next-open fills; per-side cost from measured spread plus
-commission; a linear impact term scaled by participation rate; three
-cost scenarios with the break-even cost reported. *Close by:* 0B for
-the model, 0C for the scenarios.
+**CLOSED 2026-10-06 by Filippo (model only):** next-open fills; per-side
+cost = commission + spread + linear impact × participation; three
+named scenarios (cheap / base / expensive). Scenario **numbers** and
+break-even cost freeze in 0C. Until then the evidence path raises.
 
 **D19. Correction hierarchy.**
 *Proposal:* family-wise error rate within each family using a step-down
@@ -624,11 +627,12 @@ from measured autocorrelation; both reported for every primary metric.
 *Close by:* 0C.
 
 **D21. Instrument and benchmark overlap.**
-*Proposal:* no asset may serve simultaneously as investable instrument
-and as benchmark; where QQQ and its components are both eligible, the
-index is excluded from the investable universe and retained only as a
-volatility-matched benchmark; MSTR-like crypto exposure is governed by
-D4 plus cluster limits. *Close by:* 0B.
+**CLOSED 2026-10-06 by Filippo:** no investable ticker may also be the
+official benchmark. QQQ remains in the Branch B 18 as an instrument and
+is therefore forbidden as benchmark. MSTR remains; crypto-cluster
+concentration (BTC, ETH, MSTR, COIN) is reported, not used to drop
+names. The Branch A alternative (drop QQQ from the investable set and
+keep it only as benchmark) is not in force.
 
 **D22. Calendar synchronisation and capital allocation.**
 **CLOSED 2026-10-06 by Filippo:** native calendars; portfolio metrics on
