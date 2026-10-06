@@ -1,0 +1,10 @@
+# Pinned runtime for V1 live (GitHub Actions python 3.11) and local research.
+# Do not float versions. Install with: pip install -r requirements/runtime.txt
+yfinance==1.5.2
+pandas==2.3.3
+numpy==2.2.6
+scikit-learn==1.7.2
+xgboost==3.2.0
+lightgbm==4.6.0
+joblib==1.5.3
+requests==2.34.2

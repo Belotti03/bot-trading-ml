@@ -33,6 +33,24 @@ are also closed. Remaining before 0C: 0B methodology (snapshots, lock,
 flags, costs model details, D2–D4, D16, D18, D21, D23) and 0C
 statistics (power, trials, thresholds).
 
+### Phase 0B first slice — 2026-10-06
+
+Started after Filippo authorised 0B. V1 trading rules were not changed.
+
+Delivered:
+
+- `requirements/runtime.txt` exact pins; `run_bot.yml` installs from
+  that file instead of floating `pip install` latest.
+- `research/yahoo_snapshot.py` writes append-only Yahoo daily CSVs with
+  explicit `auto_adjust=False`, raw `Close` and `AdjClose`, SHA-256
+  manifest.
+- First snapshot: `data/snapshots/yahoo_20261006T1106Z/` (VERIFY OK).
+- `docs/DATA_CONTRACT.md`.
+
+Not done in this slice: quality-flag engine, calendar reindex, wiring
+live `model_engine.py`/`main.py` to the snapshot, D16 applied inside V1
+feature code, remaining 0B decisions D2–D4, D18, D21.
+
 ### V2 roadmap: two audits, verdicts v1 APPROVED WITH CHANGES, v2 REJECTED
 
 Roadmap v1 was submitted to independent adversarial audit by GPT-5.6 Sol

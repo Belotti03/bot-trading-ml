@@ -1,0 +1,146 @@
+{
+  "downloaded_at_utc": "2026-10-06T11:06:55Z",
+  "endpoint": "yfinance.download",
+  "environment": {
+    "pandas": "2.3.3",
+    "python": "3.10.0",
+    "yfinance": "1.5.2"
+  },
+  "notes": "Close is unadjusted (execution). AdjClose is split/dividend adjusted (signals and performance). Snapshot is append-only; do not rewrite files in place.",
+  "parameters": {
+    "actions": false,
+    "auto_adjust": false,
+    "interval": "1d",
+    "period": "max"
+  },
+  "provider": "yahoo_finance",
+  "snapshot_id": "yahoo_20261006T1106Z",
+  "tickers": {
+    "AAPL": {
+      "first": "1980-12-12",
+      "last": "2026-10-05",
+      "path": "AAPL.csv",
+      "rows": 11545,
+      "sha256": "2f28df75c095cc03896b0fe1d06d6f4c1e1f6f537a38ce36698576f694137b3a"
+    },
+    "AMD": {
+      "first": "1980-03-17",
+      "last": "2026-10-05",
+      "path": "AMD.csv",
+      "rows": 11733,
+      "sha256": "cd76e068c403713e0efd37399de00ae2961ae69c7a6b2ce902ba61959d651895"
+    },
+    "AMZN": {
+      "first": "1997-05-15",
+      "last": "2026-10-05",
+      "path": "AMZN.csv",
+      "rows": 7393,
+      "sha256": "b443c00b9d61653596c060f89217737bf9c48b05ee4189739b87f41c6eb58764"
+    },
+    "ARM": {
+      "first": "2023-09-14",
+      "last": "2026-10-05",
+      "path": "ARM.csv",
+      "rows": 767,
+      "sha256": "09b16150c3d130d05960736d0dde789b07681b6de3b4f1bb679cc52aab894975"
+    },
+    "BTC-USD": {
+      "first": "2014-09-17",
+      "last": "2026-10-06",
+      "path": "BTC-USD.csv",
+      "rows": 4403,
+      "sha256": "086d7acfb94ea29ee6afaa013e45670eb693f47e89a84e640c8dbaab8715799f"
+    },
+    "COIN": {
+      "first": "2021-04-14",
+      "last": "2026-10-05",
+      "path": "COIN.csv",
+      "rows": 1376,
+      "sha256": "a7c1f1d864a5e28e92eada8440ff35235d961455cb4b6ca2e97a775c7a4e3fa0"
+    },
+    "ETH-USD": {
+      "first": "2017-11-09",
+      "last": "2026-10-06",
+      "path": "ETH-USD.csv",
+      "rows": 3254,
+      "sha256": "c3f1c7e7a1bc5acbe9b012d1c2dbdc68e3113434b0961fec0d33274ac1fa5151"
+    },
+    "GLD": {
+      "first": "2004-11-18",
+      "last": "2026-10-05",
+      "path": "GLD.csv",
+      "rows": 5503,
+      "sha256": "9ef1022272d9905adcdf0d56c5b92e0419c4e82102fe7d3c24c1889562a9f6e0"
+    },
+    "GOOGL": {
+      "first": "2004-08-19",
+      "last": "2026-10-05",
+      "path": "GOOGL.csv",
+      "rows": 5567,
+      "sha256": "491ec26c3d37ddca873f4e7158df6c995681fde74e7f346480bd81818f302950"
+    },
+    "META": {
+      "first": "2012-05-18",
+      "last": "2026-10-05",
+      "path": "META.csv",
+      "rows": 3615,
+      "sha256": "933890ee4c64cd4c3c773a8b3193f310bd42eedae40a399fe81d5ec345fa6eaa"
+    },
+    "MSFT": {
+      "first": "1986-03-13",
+      "last": "2026-10-05",
+      "path": "MSFT.csv",
+      "rows": 10219,
+      "sha256": "4e6357ee07e8e071be28196d5f4bfdfdd262d4fe2b582b83a8a1eb3d1c9b3be6"
+    },
+    "MSTR": {
+      "first": "1998-06-11",
+      "last": "2026-10-05",
+      "path": "MSTR.csv",
+      "rows": 7123,
+      "sha256": "2f329f97da8884ab372ac28864d5624082b3ddb522bbb83b2c9b3db30d000152"
+    },
+    "NVDA": {
+      "first": "1999-01-22",
+      "last": "2026-10-05",
+      "path": "NVDA.csv",
+      "rows": 6968,
+      "sha256": "a32b57612a1206318dffe456f9a6287c50299e9741bb0e42e0a70812c92fde17"
+    },
+    "PLTR": {
+      "first": "2020-09-30",
+      "last": "2026-10-05",
+      "path": "PLTR.csv",
+      "rows": 1510,
+      "sha256": "6e893b0673620b9d697ed3300e6395f37154a8a2d7dab67fe876c58281ad385c"
+    },
+    "QQQ": {
+      "first": "1999-03-10",
+      "last": "2026-10-05",
+      "path": "QQQ.csv",
+      "rows": 6936,
+      "sha256": "86b1c8ace003912eb6b49daeadf446abe093d495dbafefbc0391b31c4f6f9838"
+    },
+    "SMCI": {
+      "first": "2007-03-29",
+      "last": "2026-10-05",
+      "path": "SMCI.csv",
+      "rows": 4911,
+      "sha256": "23e9cf0bcb63c5ba2857ae87d433874b44ad31e3573c393048ec3c9dec623385"
+    },
+    "TSLA": {
+      "first": "2010-06-29",
+      "last": "2026-10-05",
+      "path": "TSLA.csv",
+      "rows": 4092,
+      "sha256": "0ba9da8b76cdb78de9755cbc76d61c794e34e76ef53c4719bd199f92c32c77b9"
+    },
+    "TSM": {
+      "first": "1997-10-09",
+      "last": "2026-10-05",
+      "path": "TSM.csv",
+      "rows": 7291,
+      "sha256": "c6a01eeb0fe7814859c51f66426c849a25dbe2101f1a68c3575a592712869ba0"
+    }
+  }
+}

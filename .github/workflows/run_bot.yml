@@ -22,10 +22,10 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: 3. Installa le librerie necessarie (Ensemble)
+      - name: 3. Installa le librerie pinnate
         run: |
           python -m pip install --upgrade pip
-          pip install yfinance xgboost lightgbm scikit-learn pandas joblib requests
+          pip install -r requirements/runtime.txt
 
       - name: 4. Addestra l'Ensemble ed Esegui l'Analisi
         env:
