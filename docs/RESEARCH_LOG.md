@@ -75,6 +75,25 @@ not a data-quality fail.
 Still open in 0B: holiday calendars, live wiring to snapshots, D2–D4,
 D16-in-V1, D18, D21.
 
+### Phase 0B third slice — session calendars — 2026-10-06
+
+Research-only. Not wired to live V1.
+
+Delivered:
+
+- `research/calendars.py`: crypto = all calendar days; equity/ETF =
+  NYSE-like holidays plus a frozen extra-closure list (9/11, Sandy,
+  named funerals including Carter 2025-01-09, Gloria, Nixon).
+- Quality flags now reindex onto that calendar.
+- Regenerated `quality_summary.json`.
+
+On `yahoo_20261006T1106Z`: missing bars fell from thousands of weekday
+holiday gaps to **1**. Residual: AMD `1980-11-04` (Yahoo hole, not an
+exchange holiday). `invalid_ohlc` still 0. Volume suspects unchanged
+(AMD 2, AAPL 1). Half-days remain expected daily bars.
+
+Still open in 0B: live wiring to snapshots, D2–D4, D16-in-V1, D18, D21.
+
 ### V2 roadmap: two audits, verdicts v1 APPROVED WITH CHANGES, v2 REJECTED
 
 Roadmap v1 was submitted to independent adversarial audit by GPT-5.6 Sol

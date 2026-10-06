@@ -1,6 +1,7 @@
 # Data-version contract (Phase 0B)
 
-Status: first slice, 2026-10-06. Does not yet bind V1 live.
+Status: snapshots, pins, quality flags, and session calendars as of
+2026-10-06. Does not yet bind V1 live.
 
 ## Snapshots
 
@@ -21,6 +22,19 @@ Live and research install from `requirements/runtime.txt` (exact pins).
 A result without snapshot hash, lock hash, interpreter version and commit
 is not admissible evidence (roadmap §3.1). This slice creates the lock
 and the snapshotter; it does not yet rewrite historical CSVs.
+
+## Calendars
+
+- Crypto (`BTC-USD`, `ETH-USD`): every calendar day.
+- US equity and ETF: NYSE-like weekdays. Regular holidays are a frozen
+  pandas rule set (New Year, MLK from 1998, Presidents Day, Good Friday,
+  Memorial Day, Juneteenth from 2022, Independence Day, Labor Day,
+  Thanksgiving, Christmas, with weekend observance). Extra full-session
+  closures are a frozen date list in `research/calendars.py`.
+- Half-day sessions still have a daily bar, so they stay expected.
+- Residual on snapshot `yahoo_20261006T1106Z`: AMD `1980-11-04` is the
+  only missing expected equity bar after the calendar; treated as a
+  provider hole, not a holiday.
 
 ## Live V1
 

@@ -9,9 +9,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from research.calendars import CRYPTO, expected_index
 from research.yahoo_snapshot import TICKERS
 
-CRYPTO = {"BTC-USD", "ETH-USD"}
 BLOCKING = (
     "bar_missing",
     "invalid_ohlc",
@@ -25,13 +25,6 @@ def sleeve(ticker: str) -> str:
     if ticker in {"QQQ", "GLD"}:
         return "etf"
     return "us_equity"
-
-
-def expected_index(dates: pd.DatetimeIndex, ticker: str) -> pd.DatetimeIndex:
-    start, end = dates.min(), dates.max()
-    if ticker in CRYPTO:
-        return pd.date_range(start, end, freq="D")
-    return pd.bdate_range(start, end)
 
 
 def flag_frame(raw: pd.DataFrame, ticker: str) -> pd.DataFrame:
@@ -82,7 +75,9 @@ def summarise(frame: pd.DataFrame, ticker: str) -> dict:
         "ticker": ticker,
         "sleeve": sleeve(ticker),
         "calendar_note": (
-            "all calendar days" if ticker in CRYPTO else "weekdays only; holidays not yet excluded"
+            "all calendar days"
+            if ticker in CRYPTO
+            else "NYSE-like weekdays minus frozen holidays and extra closures"
         ),
         "calendar_rows": n,
         "bars_present": present,
@@ -108,8 +103,9 @@ def run_snapshot(snapshot_dir: Path) -> dict:
     report = {
         "snapshot_id": manifest["snapshot_id"],
         "calendar_limitation": (
-            "US equity/ETF calendar is weekdays only. Exchange holidays "
-            "are not yet in the expected index (0B incomplete)."
+            "US equity/ETF expected index is NYSE-like holidays plus a "
+            "frozen extra-closure list. Half-days remain expected bars. "
+            "Crypto is every calendar day."
         ),
         "tickers": rows,
     }
