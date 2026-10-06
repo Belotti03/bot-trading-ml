@@ -51,6 +51,30 @@ Not done in this slice: quality-flag engine, calendar reindex, wiring
 live `model_engine.py`/`main.py` to the snapshot, D16 applied inside V1
 feature code, remaining 0B decisions D2–D4, D18, D21.
 
+### Phase 0B second slice — quality flags — 2026-10-06
+
+Research-only. Not wired to `main.py` / `model_engine.py`.
+
+Delivered:
+
+- `research/bar_quality.py` plus `tests/test_bar_quality.py`.
+- Blocking flags: `bar_missing`, `invalid_ohlc`, `volume_suspect`.
+- Annotative: `corporate_action` where `AdjClose != Close`.
+- Returns via `pct_change(fill_method=None)`; blocking bars become NaN.
+- Crypto expected index = all calendar days; equity/ETF = weekdays.
+- `data/snapshots/yahoo_20261006T1106Z/quality_summary.json`.
+
+On this snapshot: crypto has 0 missing / 0 invalid OHLC. Equities show
+weekday gaps consistent with US holidays not yet excluded from the
+expected calendar (limitation still open). `invalid_ohlc` is 0 on all
+18 tickers. Volume suspects are rare (AMD 2, AAPL 1). The
+`corporate_action` count is high on names with splits/dividends because
+the flag is persistent divergence, not event-day only — annotative,
+not a data-quality fail.
+
+Still open in 0B: holiday calendars, live wiring to snapshots, D2–D4,
+D16-in-V1, D18, D21.
+
 ### V2 roadmap: two audits, verdicts v1 APPROVED WITH CHANGES, v2 REJECTED
 
 Roadmap v1 was submitted to independent adversarial audit by GPT-5.6 Sol
