@@ -66,6 +66,9 @@ SUMMER_AFTER_CLOSE = utc(2026, 7, 15, 20, 15)
 # Inverno (EST): chiusura 16:00 ET = 21:00 UTC, consolidata alle 21:15.
 WINTER_CRON_2100 = utc(2026, 12, 15, 21, 0)
 WINTER_CONSOLIDATED = utc(2026, 12, 15, 21, 15)
+# 9 ottobre 2026, EDT: chiusura 16:00 ET = 20:00 UTC, consolidata alle 20:15.
+# Il cron 21:00 UTC tratta quindi oggi come sessione USA gia' chiusa.
+OCT9_CRON_2100 = utc(2026, 10, 9, 21, 0)
 
 # Riferimento usato da tutte le fixture: mercoledi', sessione USA aperta.
 REFERENCE_NOW = SUMMER_MIDSESSION
@@ -442,6 +445,92 @@ def test_last_bar_with_nan_close_does_not_poison_the_signal():
     assert rejection is None
     assert to_bar_date_text(label) == "2026-07-14"
     assert is_valid_price(row["Close"].iloc[0])
+
+
+def _unsettled_last_session_frame(end_date, periods=10, zone="America/New_York"):
+    """Ultima riga come Yahoo dopo close EDT: Returns paddati, SMA_10 e Close NaN."""
+    frame = make_frame(end_date, periods=periods, zone=zone)
+    frame.iloc[-1, frame.columns.get_loc("Returns")] = 0.0
+    frame.iloc[-1, frame.columns.get_loc("SMA_10")] = NAN
+    frame.iloc[-1, frame.columns.get_loc("Close")] = NAN
+    return frame
+
+
+def test_oct9_2100_unsettled_last_bar_falls_back_to_previous_session():
+    frame = _unsettled_last_session_frame(date(2026, 10, 9))
+    previous_close = float(frame["Close"].iloc[-2])
+
+    label, row, rejection = select_signal_bar(
+        frame, FEATURES, "NVDA", now=OCT9_CRON_2100
+    )
+
+    assert rejection is None
+    assert to_bar_date_text(label) == "2026-10-08"
+    assert float(row["Close"].iloc[0]) == previous_close
+    assert is_valid_price(row["Close"].iloc[0])
+    assert is_finite_number(row["SMA_10"].iloc[0])
+
+
+def test_crypto_oct9_2100_uses_previous_session():
+    frame = _unsettled_last_session_frame(date(2026, 10, 9), zone="UTC")
+
+    label, row, rejection = select_signal_bar(
+        frame, FEATURES, "BTC-USD", now=OCT9_CRON_2100
+    )
+
+    assert rejection is None
+    assert to_bar_date_text(label) == "2026-10-08"
+
+
+def test_unsettled_last_closed_session_does_not_walk_past_previous():
+    frame = _unsettled_last_session_frame(date(2026, 7, 15))
+    frame.iloc[-2, frame.columns.get_loc("RSI")] = NAN
+    older_close = float(frame["Close"].iloc[-3])
+
+    label, row, rejection = select_signal_bar(
+        frame, FEATURES, "NVDA", now=SUMMER_AFTER_CLOSE
+    )
+
+    assert label is None
+    assert row is None
+    assert "2026-07-15" in rejection
+    assert "SMA_10" in rejection
+    assert "sessione precedente inutilizzabile" in rejection
+    assert "2026-07-14" in rejection
+    assert "RSI" in rejection
+    assert "2026-07-13" not in rejection
+    assert older_close != 0.0
+
+
+def test_unsettled_last_session_without_previous_is_rejected():
+    frame = _unsettled_last_session_frame(date(2026, 7, 15), periods=1)
+
+    label, row, rejection = select_signal_bar(
+        frame, FEATURES, "NVDA", now=SUMMER_AFTER_CLOSE
+    )
+
+    assert label is None
+    assert row is None
+    assert "2026-07-15" in rejection
+    assert "SMA_10" in rejection
+    assert "sessione precedente" not in rejection
+
+
+def test_fallback_previous_over_age_cap_is_rejected():
+    # 15/07 dopo close: ultima barra 10/07 (eta' 5, al cap) invalida;
+    # la precedente 09/07 ha eta' 6 e non puo' essere usata.
+    frame = _unsettled_last_session_frame(date(2026, 7, 10))
+
+    label, row, rejection = select_signal_bar(
+        frame, FEATURES, "NVDA", now=SUMMER_AFTER_CLOSE
+    )
+
+    assert label is None
+    assert row is None
+    assert "2026-07-10" in rejection
+    assert "sessione precedente inutilizzabile" in rejection
+    assert "obsoleta" in rejection
+    assert "2026-07-09" in rejection
 
 
 def test_no_backward_search_when_expected_bar_is_invalid():

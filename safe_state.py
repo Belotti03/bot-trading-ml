@@ -262,6 +262,45 @@ def ordered_session_dates(labels):
     return dates
 
 
+def _locate_session_row(df, labels, session_date):
+    """Ultima riga dell'indice che appartiene a session_date."""
+    row_positions = [
+        position for position, label in enumerate(labels)
+        if to_bar_date(label) == session_date
+    ]
+
+    if not row_positions:
+        return None, None, (
+            f"barra attesa {session_date.isoformat()} assente dai dati"
+        )
+
+    position = row_positions[-1]
+
+    return labels[position], df.iloc[[position]], None
+
+
+def _signal_row_problem(row, required, price_column, session_date, provenance):
+    """Motivo per cui la riga non e' un segnale, oppure None se utilizzabile."""
+    for column in required:
+        value = row[column].iloc[0]
+
+        if not is_finite_number(value):
+            return (
+                f"barra {session_date.isoformat()} ({provenance}): "
+                f"{column} non finito ({value!r})"
+            )
+
+    price = row[price_column].iloc[0]
+
+    if not is_valid_price(price):
+        return (
+            f"barra {session_date.isoformat()} ({provenance}): "
+            f"{price_column} non positivo ({price!r})"
+        )
+
+    return None
+
+
 def select_signal_bar(df, feature_columns, ticker, price_column="Close", now=None):
     """
     Barra da cui derivano feature, probabilita', prezzo e asof.
@@ -274,9 +313,10 @@ def select_signal_bar(df, feature_columns, ticker, price_column="Close", now=Non
           che e' chiusa e consolidata;
         - altrimenti la sessione immediatamente precedente.
 
-    Se la riga attesa non e' utilizzabile il ticker viene rifiutato. Non si
-    risale indietro in cerca di una barra qualsiasi: una barra piu' vecchia
-    non e' un sostituto accettabile.
+    Se l'ultima sessione e' calendar-complete ma la riga del provider non e'
+    utilizzabile, si tenta al massimo la sessione immediatamente precedente,
+    e solo se quella e' chiusa, valida e dentro il cap di eta'. Non si
+    risale oltre: una barra piu' vecchia non e' un sostituto accettabile.
     """
     market = market_for_ticker(ticker)
 
@@ -312,67 +352,89 @@ def select_signal_bar(df, feature_columns, ticker, price_column="Close", now=Non
             f"ultima barra datata nel futuro ({latest_date.isoformat()})"
         )
 
+    def evaluate(session_date, provenance):
+        age_days = (today - session_date).days
+        max_age = SESSION_RULES[market]["max_bar_age_days"]
+
+        if age_days > max_age:
+            return None, None, (
+                f"barra obsoleta: {session_date.isoformat()} "
+                f"({age_days} giorni, cap {max_age} per {market})"
+            )
+
+        label, row, missing = _locate_session_row(
+            df,
+            labels,
+            session_date
+        )
+
+        if missing is not None:
+            return None, None, missing
+
+        problem = _signal_row_problem(
+            row,
+            required,
+            price_column,
+            session_date,
+            provenance
+        )
+
+        if problem is not None:
+            return None, None, problem
+
+        return label, row, None
+
     if is_session_complete(latest_date, market, now=now):
-        expected_date = latest_date
-        provenance = "ultima sessione chiusa"
+        label, row, problem = evaluate(
+            latest_date,
+            "ultima sessione chiusa"
+        )
 
-    else:
+        if problem is None:
+            return label, row, None
+
         if len(session_dates) < 2:
+            return None, None, problem
+
+        previous_date = session_dates[-2]
+
+        if not is_session_complete(previous_date, market, now=now):
             return None, None, (
-                f"sessione {latest_date.isoformat()} non ancora chiusa e "
-                f"nessuna sessione precedente disponibile"
+                problem
+                + "; sessione precedente "
+                + previous_date.isoformat()
+                + " non ancora chiusa"
             )
 
-        expected_date = session_dates[-2]
-        provenance = "sessione precedente"
-
-        if not is_session_complete(expected_date, market, now=now):
-            return None, None, (
-                f"nessuna sessione chiusa disponibile "
-                f"(ultima: {latest_date.isoformat()})"
-            )
-
-    age_days = (today - expected_date).days
-
-    max_age = SESSION_RULES[market]["max_bar_age_days"]
-
-    if age_days > max_age:
-        return None, None, (
-            f"barra obsoleta: {expected_date.isoformat()} "
-            f"({age_days} giorni, cap {max_age} per {market})"
+        prev_label, prev_row, prev_problem = evaluate(
+            previous_date,
+            "sessione precedente"
         )
 
-    row_positions = [
-        position for position, label in enumerate(labels)
-        if to_bar_date(label) == expected_date
-    ]
+        if prev_problem is None:
+            return prev_label, prev_row, None
 
-    if not row_positions:
         return None, None, (
-            f"barra attesa {expected_date.isoformat()} assente dai dati"
+            problem
+            + "; sessione precedente inutilizzabile: "
+            + prev_problem
         )
 
-    position = row_positions[-1]
-    row = df.iloc[[position]]
-
-    for column in required:
-        value = row[column].iloc[0]
-
-        if not is_finite_number(value):
-            return None, None, (
-                f"barra {expected_date.isoformat()} ({provenance}): "
-                f"{column} non finito ({value!r})"
-            )
-
-    price = row[price_column].iloc[0]
-
-    if not is_valid_price(price):
+    if len(session_dates) < 2:
         return None, None, (
-            f"barra {expected_date.isoformat()} ({provenance}): "
-            f"{price_column} non positivo ({price!r})"
+            f"sessione {latest_date.isoformat()} non ancora chiusa e "
+            f"nessuna sessione precedente disponibile"
         )
 
-    return labels[position], row, None
+    expected_date = session_dates[-2]
+
+    if not is_session_complete(expected_date, market, now=now):
+        return None, None, (
+            f"nessuna sessione chiusa disponibile "
+            f"(ultima: {latest_date.isoformat()})"
+        )
+
+    return evaluate(expected_date, "sessione precedente")
 
 
 # -------------------------------------------------------------------------
