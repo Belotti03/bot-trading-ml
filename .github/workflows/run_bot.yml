@@ -2,8 +2,10 @@ name: Bot Trading ML Automation
 
 on:
   schedule:
-    # Esegue dal Lunedì al Venerdì alle 13:30, 17:00 e 21:00 UTC
-    - cron: '30 13,17,21 * * 1-5'
+    # Lun-Ven UTC: 13:17, 17:41, 21:23 (tre schedule distinti)
+    - cron: '17 13 * * 1-5'
+    - cron: '41 17 * * 1-5'
+    - cron: '23 21 * * 1-5'
   workflow_dispatch:
 
 permissions:
