@@ -52,8 +52,8 @@
         "positive_rate": 0.5303030303030303,
         "predicted_positive_rate": 0.5545454545454546,
         "accuracy": 0.4727272727272727,
-        "brier_score": 0.27336168331105815,
-        "log_loss": 0.7436763882893617
+        "brier_score": 0.27346005349786606,
+        "log_loss": 0.7438961442935177
     },
     "PLTR": {
         "samples": 330,
@@ -108,16 +108,16 @@
         "positive_rate": 0.5333333333333333,
         "predicted_positive_rate": 0.4090909090909091,
         "accuracy": 0.44545454545454544,
-        "brier_score": 0.28657655110498037,
-        "log_loss": 0.7752995077394026
+        "brier_score": 0.2865833062555995,
+        "log_loss": 0.7753131043893841
     },
     "AAPL": {
         "samples": 330,
         "positive_rate": 0.5424242424242425,
-        "predicted_positive_rate": 0.4575757575757576,
-        "accuracy": 0.4909090909090909,
-        "brier_score": 0.26214817028021803,
-        "log_loss": 0.7183830859894001
+        "predicted_positive_rate": 0.45454545454545453,
+        "accuracy": 0.49393939393939396,
+        "brier_score": 0.2619950929939364,
+        "log_loss": 0.7181092466412351
     },
     "MSFT": {
         "samples": 330,
@@ -132,8 +132,8 @@
         "positive_rate": 0.5636363636363636,
         "predicted_positive_rate": 0.5848484848484848,
         "accuracy": 0.5181818181818182,
-        "brier_score": 0.27620199985153926,
-        "log_loss": 0.7532152466864922
+        "brier_score": 0.2763518166858654,
+        "log_loss": 0.7535385987531448
     },
     "GLD": {
         "samples": 330,
