@@ -1,146 +1,146 @@
 {
     "BTC-USD": {
-        "samples": 560,
-        "positive_rate": 0.4982142857142857,
-        "predicted_positive_rate": 0.5660714285714286,
-        "accuracy": 0.4928571428571429,
-        "brier_score": 0.269184484653247,
-        "log_loss": 0.7341797807614522
+        "samples": 561,
+        "positive_rate": 0.49910873440285203,
+        "predicted_positive_rate": 0.5668449197860963,
+        "accuracy": 0.49376114081996436,
+        "brier_score": 0.2691153311355016,
+        "log_loss": 0.7340366887381433
     },
     "ETH-USD": {
-        "samples": 560,
-        "positive_rate": 0.5160714285714286,
-        "predicted_positive_rate": 0.4982142857142857,
-        "accuracy": 0.49642857142857144,
-        "brier_score": 0.267724575727479,
-        "log_loss": 0.7322343261849464
+        "samples": 561,
+        "positive_rate": 0.5169340463458111,
+        "predicted_positive_rate": 0.49732620320855614,
+        "accuracy": 0.49554367201426025,
+        "brier_score": 0.2677786455970594,
+        "log_loss": 0.7323364764647214
     },
     "NVDA": {
-        "samples": 330,
-        "positive_rate": 0.5242424242424243,
-        "predicted_positive_rate": 0.4696969696969697,
-        "accuracy": 0.503030303030303,
-        "brier_score": 0.27457784497870213,
-        "log_loss": 0.7491848750117143
+        "samples": 331,
+        "positive_rate": 0.525679758308157,
+        "predicted_positive_rate": 0.47129909365558914,
+        "accuracy": 0.5045317220543807,
+        "brier_score": 0.27429585424337055,
+        "log_loss": 0.7485971293046466
     },
     "AMD": {
-        "samples": 330,
-        "positive_rate": 0.5484848484848485,
-        "predicted_positive_rate": 0.43636363636363634,
-        "accuracy": 0.4636363636363636,
-        "brier_score": 0.28014111832905186,
-        "log_loss": 0.7570628228854621
+        "samples": 331,
+        "positive_rate": 0.5498489425981873,
+        "predicted_positive_rate": 0.4380664652567976,
+        "accuracy": 0.4652567975830816,
+        "brier_score": 0.2800055989889253,
+        "log_loss": 0.7567807808769409
     },
     "MSTR": {
-        "samples": 330,
-        "positive_rate": 0.4393939393939394,
-        "predicted_positive_rate": 0.45454545454545453,
-        "accuracy": 0.48787878787878786,
-        "brier_score": 0.2777014226006002,
-        "log_loss": 0.7552509560898372
+        "samples": 331,
+        "positive_rate": 0.4380664652567976,
+        "predicted_positive_rate": 0.45317220543806647,
+        "accuracy": 0.48942598187311176,
+        "brier_score": 0.2775510354679943,
+        "log_loss": 0.7549298475232556
     },
     "COIN": {
-        "samples": 330,
-        "positive_rate": 0.4575757575757576,
-        "predicted_positive_rate": 0.5696969696969697,
-        "accuracy": 0.5060606060606061,
-        "brier_score": 0.26524929773386885,
-        "log_loss": 0.7269252988949628
+        "samples": 331,
+        "positive_rate": 0.459214501510574,
+        "predicted_positive_rate": 0.56797583081571,
+        "accuracy": 0.5045317220543807,
+        "brier_score": 0.2654619070063723,
+        "log_loss": 0.7273451802341102
     },
     "TSM": {
-        "samples": 330,
-        "positive_rate": 0.5303030303030303,
-        "predicted_positive_rate": 0.5545454545454546,
-        "accuracy": 0.4727272727272727,
-        "brier_score": 0.27336168331105815,
-        "log_loss": 0.7436763882893617
+        "samples": 331,
+        "positive_rate": 0.5287009063444109,
+        "predicted_positive_rate": 0.552870090634441,
+        "accuracy": 0.4743202416918429,
+        "brier_score": 0.27297857389381674,
+        "log_loss": 0.742887629846611
     },
     "PLTR": {
-        "samples": 330,
-        "positive_rate": 0.5272727272727272,
-        "predicted_positive_rate": 0.7636363636363637,
-        "accuracy": 0.509090909090909,
-        "brier_score": 0.2664078120706382,
-        "log_loss": 0.7314119793438199
+        "samples": 331,
+        "positive_rate": 0.525679758308157,
+        "predicted_positive_rate": 0.7613293051359517,
+        "accuracy": 0.5105740181268882,
+        "brier_score": 0.2659058458709262,
+        "log_loss": 0.7303525005054244
     },
     "ARM": {
-        "samples": 330,
-        "positive_rate": 0.5151515151515151,
-        "predicted_positive_rate": 0.45151515151515154,
-        "accuracy": 0.4818181818181818,
-        "brier_score": 0.26996919166798455,
-        "log_loss": 0.7361060466098616
+        "samples": 331,
+        "positive_rate": 0.513595166163142,
+        "predicted_positive_rate": 0.4501510574018127,
+        "accuracy": 0.48338368580060426,
+        "brier_score": 0.269783937344483,
+        "log_loss": 0.7357258017551133
     },
     "SMCI": {
-        "samples": 330,
-        "positive_rate": 0.47575757575757577,
-        "predicted_positive_rate": 0.36666666666666664,
-        "accuracy": 0.48484848484848486,
-        "brier_score": 0.27223345114237635,
-        "log_loss": 0.7411267095579721
+        "samples": 331,
+        "positive_rate": 0.4743202416918429,
+        "predicted_positive_rate": 0.3685800604229607,
+        "accuracy": 0.48338368580060426,
+        "brier_score": 0.2722432734102061,
+        "log_loss": 0.7411358706126345
     },
     "TSLA": {
-        "samples": 330,
-        "positive_rate": 0.5121212121212121,
-        "predicted_positive_rate": 0.3242424242424242,
-        "accuracy": 0.4909090909090909,
-        "brier_score": 0.2626136061871016,
-        "log_loss": 0.7218412976879058
+        "samples": 331,
+        "positive_rate": 0.5105740181268882,
+        "predicted_positive_rate": 0.32326283987915405,
+        "accuracy": 0.49244712990936557,
+        "brier_score": 0.2623106439153696,
+        "log_loss": 0.7212184551301206
     },
     "META": {
-        "samples": 330,
-        "positive_rate": 0.509090909090909,
-        "predicted_positive_rate": 0.593939393939394,
-        "accuracy": 0.5515151515151515,
-        "brier_score": 0.25721161489185257,
-        "log_loss": 0.7118687190345824
+        "samples": 331,
+        "positive_rate": 0.5105740181268882,
+        "predicted_positive_rate": 0.5921450151057401,
+        "accuracy": 0.5498489425981873,
+        "brier_score": 0.25772843961609115,
+        "log_loss": 0.7129282226480217
     },
     "AMZN": {
-        "samples": 330,
-        "positive_rate": 0.5181818181818182,
-        "predicted_positive_rate": 0.32727272727272727,
-        "accuracy": 0.5,
-        "brier_score": 0.2726016194574249,
-        "log_loss": 0.7428749637205759
+        "samples": 331,
+        "positive_rate": 0.5166163141993958,
+        "predicted_positive_rate": 0.32628398791540786,
+        "accuracy": 0.5015105740181269,
+        "brier_score": 0.2724660236989707,
+        "log_loss": 0.7425900105441213
     },
     "GOOGL": {
-        "samples": 330,
-        "positive_rate": 0.5333333333333333,
-        "predicted_positive_rate": 0.4090909090909091,
-        "accuracy": 0.44545454545454544,
-        "brier_score": 0.28674800854882887,
-        "log_loss": 0.7757727867957971
+        "samples": 331,
+        "positive_rate": 0.5347432024169184,
+        "predicted_positive_rate": 0.41389728096676737,
+        "accuracy": 0.44410876132930516,
+        "brier_score": 0.28746150949779836,
+        "log_loss": 0.777496618125358
     },
     "AAPL": {
-        "samples": 330,
-        "positive_rate": 0.5424242424242425,
-        "predicted_positive_rate": 0.45454545454545453,
-        "accuracy": 0.49393939393939396,
-        "brier_score": 0.26201530837506815,
-        "log_loss": 0.7181554255234671
+        "samples": 331,
+        "positive_rate": 0.5438066465256798,
+        "predicted_positive_rate": 0.4561933534743202,
+        "accuracy": 0.48942598187311176,
+        "brier_score": 0.2623173763673633,
+        "log_loss": 0.7187210035117393
     },
     "MSFT": {
-        "samples": 330,
-        "positive_rate": 0.509090909090909,
-        "predicted_positive_rate": 0.5484848484848485,
-        "accuracy": 0.47575757575757577,
-        "brier_score": 0.2655169226889066,
-        "log_loss": 0.72732720292297
+        "samples": 331,
+        "positive_rate": 0.5105740181268882,
+        "predicted_positive_rate": 0.5468277945619335,
+        "accuracy": 0.4743202416918429,
+        "brier_score": 0.26681634866977544,
+        "log_loss": 0.7305558931191505
     },
     "QQQ": {
-        "samples": 330,
-        "positive_rate": 0.5636363636363636,
-        "predicted_positive_rate": 0.5848484848484848,
-        "accuracy": 0.5181818181818182,
-        "brier_score": 0.27620199985153926,
-        "log_loss": 0.7532152466864922
+        "samples": 331,
+        "positive_rate": 0.5619335347432024,
+        "predicted_positive_rate": 0.5830815709969789,
+        "accuracy": 0.5196374622356495,
+        "brier_score": 0.2757214712967794,
+        "log_loss": 0.7522054029807409
     },
     "GLD": {
-        "samples": 330,
-        "positive_rate": 0.5606060606060606,
-        "predicted_positive_rate": 0.7212121212121212,
-        "accuracy": 0.5424242424242425,
-        "brier_score": 0.26535684783774377,
-        "log_loss": 0.7309266755207317
+        "samples": 331,
+        "positive_rate": 0.5589123867069486,
+        "predicted_positive_rate": 0.7220543806646526,
+        "accuracy": 0.540785498489426,
+        "brier_score": 0.2654032604758077,
+        "log_loss": 0.7309983778574676
     }
 }
