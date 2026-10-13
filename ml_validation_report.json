@@ -1,19 +1,19 @@
 {
     "BTC-USD": {
-        "samples": 561,
-        "positive_rate": 0.49910873440285203,
-        "predicted_positive_rate": 0.5614973262032086,
-        "accuracy": 0.48841354723707664,
-        "brier_score": 0.26777377625408716,
-        "log_loss": 0.7315115469609546
+        "samples": 560,
+        "positive_rate": 0.4982142857142857,
+        "predicted_positive_rate": 0.5660714285714286,
+        "accuracy": 0.4928571428571429,
+        "brier_score": 0.269184484653247,
+        "log_loss": 0.7341797807614522
     },
     "ETH-USD": {
-        "samples": 561,
-        "positive_rate": 0.5169340463458111,
-        "predicted_positive_rate": 0.49019607843137253,
-        "accuracy": 0.48128342245989303,
-        "brier_score": 0.26405370027994746,
-        "log_loss": 0.7229549123716781
+        "samples": 560,
+        "positive_rate": 0.5160714285714286,
+        "predicted_positive_rate": 0.4982142857142857,
+        "accuracy": 0.49642857142857144,
+        "brier_score": 0.267724575727479,
+        "log_loss": 0.7322343261849464
     },
     "NVDA": {
         "samples": 330,
@@ -52,8 +52,8 @@
         "positive_rate": 0.5303030303030303,
         "predicted_positive_rate": 0.5545454545454546,
         "accuracy": 0.4727272727272727,
-        "brier_score": 0.27346005349786606,
-        "log_loss": 0.7438961442935177
+        "brier_score": 0.27336168331105815,
+        "log_loss": 0.7436763882893617
     },
     "PLTR": {
         "samples": 330,
@@ -108,16 +108,16 @@
         "positive_rate": 0.5333333333333333,
         "predicted_positive_rate": 0.4090909090909091,
         "accuracy": 0.44545454545454544,
-        "brier_score": 0.2865833062555995,
-        "log_loss": 0.7753131043893841
+        "brier_score": 0.28674800854882887,
+        "log_loss": 0.7757727867957971
     },
     "AAPL": {
         "samples": 330,
         "positive_rate": 0.5424242424242425,
         "predicted_positive_rate": 0.45454545454545453,
         "accuracy": 0.49393939393939396,
-        "brier_score": 0.2619950929939364,
-        "log_loss": 0.7181092466412351
+        "brier_score": 0.26201530837506815,
+        "log_loss": 0.7181554255234671
     },
     "MSFT": {
         "samples": 330,
@@ -132,8 +132,8 @@
         "positive_rate": 0.5636363636363636,
         "predicted_positive_rate": 0.5848484848484848,
         "accuracy": 0.5181818181818182,
-        "brier_score": 0.2763518166858654,
-        "log_loss": 0.7535385987531448
+        "brier_score": 0.27620199985153926,
+        "log_loss": 0.7532152466864922
     },
     "GLD": {
         "samples": 330,
