@@ -12,6 +12,7 @@ viene usata (yfinance e requests sono sostituiti da stub).
 import json
 import math
 import os
+import pickle
 import shutil
 import subprocess
 import sys
@@ -29,6 +30,7 @@ REPO_ROOT = os.path.dirname(
 
 sys.path.insert(0, REPO_ROOT)
 
+from research.calendars import nyse_sessions                # noqa: E402
 from safe_state import (                                    # noqa: E402
     REQUIRED_STATE_FIELDS,
     SESSION_RULES,
@@ -165,6 +167,8 @@ def scout_entry(prob, price, days_ago=1):
 # -------------------------------------------------------------------------
 
 HARNESS = '''
+import os
+import pickle
 import runpy
 import sys
 import types
@@ -203,8 +207,11 @@ requests_stub = types.ModuleType("requests")
 
 
 def _post(url, json=None, **kwargs):
+    text = (json or {}).get("text", "")
     with open("telegram_calls.txt", "a") as handle:
         handle.write("sent\\n")
+    with open("telegram_body.txt", "w", encoding="utf-8") as handle:
+        handle.write(text)
 
     class Response:
         status_code = 200
@@ -219,6 +226,10 @@ yfinance_stub = types.ModuleType("yfinance")
 
 
 def _download(ticker, **kwargs):
+    path = os.path.join(os.getcwd(), "yahoo_" + ticker + ".pkl")
+    if os.path.exists(path):
+        with open(path, "rb") as handle:
+            return pickle.load(handle)
     return _frame()
 
 
@@ -238,14 +249,14 @@ runpy.run_path(REPO_ROOT + "/main.py", run_name="__main__")
 '''
 
 
-def run_main(state_payload, scout_payload, now=None):
+def run_main(state_payload, scout_payload, now=None, yahoo_frames=None):
     """
     Esegue main.py in una sandbox e riporta esito e stato finale.
 
     I payload possono essere dict (serializzati) o testo grezzo, per poter
     scrivere NaN letterali che json.dumps rifiuterebbe. L'istante `now` viene
     imposto a main.py tramite l'harness, per rendere deterministica la policy
-    di recency.
+    di recency. `yahoo_frames` sostituisce yf.download per i ticker indicati.
     """
     workdir = tempfile.mkdtemp(prefix="nanguard_")
 
@@ -266,6 +277,12 @@ def run_main(state_payload, scout_payload, now=None):
 
         state_text = materialise(state_payload, "portfolio_state.json")
         materialise(scout_payload, "scout_signals.json")
+
+        if yahoo_frames:
+            for ticker, frame in yahoo_frames.items():
+                path = os.path.join(workdir, "yahoo_" + ticker + ".pkl")
+                with open(path, "wb") as handle:
+                    pickle.dump(frame, handle)
 
         harness_path = os.path.join(workdir, "_harness.py")
 
@@ -295,6 +312,12 @@ def run_main(state_payload, scout_payload, now=None):
             with open(state_path) as handle:
                 state_after = handle.read()
 
+        telegram_path = os.path.join(workdir, "telegram_body.txt")
+        telegram_text = None
+        if os.path.exists(telegram_path):
+            with open(telegram_path, encoding="utf-8") as handle:
+                telegram_text = handle.read()
+
         return {
             "returncode": completed.returncode,
             "stdout": completed.stdout,
@@ -305,6 +328,7 @@ def run_main(state_payload, scout_payload, now=None):
             "telegram_sent": os.path.exists(
                 os.path.join(workdir, "telegram_calls.txt")
             ),
+            "telegram_text": telegram_text,
             "leftovers": [
                 name for name in os.listdir(workdir)
                 if name.endswith(".tmp")
@@ -1385,6 +1409,465 @@ def test_run_scout_and_train_ties_features_price_and_asof_to_one_bar():
     assert math.isclose(
         entry["prob"], expected_prob, rel_tol=0.0, abs_tol=1e-12
     ), (entry["prob"], expected_prob)
+
+
+# =========================================================================
+# 8. MACRO SPY/SMA200 E ATR: BARRA CONSOLIDATA, NO LEAKAGE
+# =========================================================================
+
+EARLY_CLOSE_AFTER = utc(2026, 11, 27, 18, 20)
+EARLY_CLOSE_BEFORE = utc(2026, 11, 27, 17, 0)
+
+
+def make_ohlc(index, closes):
+    closes = pd.Series(np.asarray(closes, dtype=float), index=index)
+    return pd.DataFrame(
+        {
+            "Open": closes,
+            "High": closes + 1.0,
+            "Low": (closes - 1.0).clip(lower=0.01),
+            "Close": closes,
+            "Volume": 1000.0,
+        }
+    )
+
+
+def nyse_index_ending(end_date, periods=250):
+    end = pd.Timestamp(end_date).normalize()
+    start = end - pd.Timedelta(days=int(periods * 3) + 40)
+    sessions = nyse_sessions(start, end)
+    return sessions[-periods:]
+
+
+def nyse_ohlc_ending(end_date, periods=250, closes=None):
+    index = nyse_index_ending(end_date, periods)
+    if closes is None:
+        closes = 100.0 + np.arange(len(index), dtype=float)
+    elif np.isscalar(closes):
+        closes = np.full(len(index), float(closes))
+    return make_ohlc(index, closes)
+
+
+def constant_ohlc(end_date, periods=30, close=100.0, width=0.5):
+    index = nyse_index_ending(end_date, periods)
+    closes = np.full(len(index), close, dtype=float)
+    frame = make_ohlc(index, closes)
+    frame["High"] = close + width
+    frame["Low"] = close - width
+    frame["Open"] = close
+    return frame
+
+
+def assert_run_ok(result):
+    assert result["returncode"] == 0, result["stderr"] or result["stdout"]
+    assert result["telegram_text"] is not None
+
+
+def test_nan_comparison_is_false_and_must_not_decide_regime():
+    assert (float("nan") >= float("nan")) is False
+
+
+def test_macro_valid_bullish_allows_entry():
+    now = SUMMER_AFTER_CLOSE
+    spy = nyse_ohlc_ending(date(2026, 7, 15), periods=250)
+    scout = {
+        "GLD": scout_entry(0.75, 250.0, days_ago=1),
+    }
+    scout["GLD"]["asof"] = days_ago_text(1, reference=now)
+
+    result = run_main(
+        complete_state(),
+        scout,
+        now=now,
+        yahoo_frames={"SPY": spy},
+    )
+
+    assert_run_ok(result)
+    text = result["telegram_text"]
+    assert "BULLISH" in text
+    assert "BEARISH" not in text
+    assert "DATI MACRO NON VALIDI" not in text
+    assert "GLD" in json.loads(result["state_after"])["positions"]
+
+
+def test_macro_valid_bearish_freezes_entries_keeps_positions():
+    now = SUMMER_AFTER_CLOSE
+    spy = nyse_ohlc_ending(
+        date(2026, 7, 15),
+        periods=250,
+        closes=np.concatenate([
+            np.full(240, 200.0),
+            np.full(10, 50.0),
+        ]),
+    )
+    state = complete_state(
+        positions={
+            "NVDA": {"qty": 5.0, "entry_price": 100.0, "peak_price": 100.0}
+        }
+    )
+    scout = {
+        "NVDA": scout_entry(0.70, 100.0, days_ago=1),
+        "GLD": scout_entry(0.80, 250.0, days_ago=1),
+    }
+    for entry in scout.values():
+        entry["asof"] = days_ago_text(1, reference=now)
+
+    result = run_main(
+        state,
+        scout,
+        now=now,
+        yahoo_frames={
+            "SPY": spy,
+            "NVDA": constant_ohlc(date(2026, 7, 15), close=100.0, width=0.5),
+        },
+    )
+
+    assert_run_ok(result)
+    text = result["telegram_text"]
+    assert "BEARISH" in text
+    assert "DATI MACRO NON VALIDI" not in text
+    assert "$nan" not in text
+    persisted = json.loads(result["state_after"])
+    assert "NVDA" in persisted["positions"]
+    assert "GLD" not in persisted["positions"]
+
+
+def test_macro_sma200_uses_selected_bar_window_without_last_nan():
+    now = SUMMER_AFTER_CLOSE
+    spy = nyse_ohlc_ending(date(2026, 7, 15), periods=250)
+    spy.iloc[-1, spy.columns.get_loc("Close")] = NAN
+    spy.iloc[-1, spy.columns.get_loc("High")] = NAN
+    spy.iloc[-1, spy.columns.get_loc("Low")] = NAN
+
+    selected = -2
+    window = spy["Close"].iloc[selected - 199: selected + 1]
+    assert len(window) == 200
+    assert window.isna().sum() == 0
+    expected_close = float(spy["Close"].iloc[selected])
+    expected_sma = float(window.mean(skipna=False))
+    leaked_with_last = spy["Close"].iloc[-200:]
+    assert leaked_with_last.isna().any()
+
+    scout = {"GLD": scout_entry(0.75, 250.0)}
+    scout["GLD"]["asof"] = days_ago_text(1, reference=now)
+
+    result = run_main(
+        complete_state(),
+        scout,
+        now=now,
+        yahoo_frames={"SPY": spy},
+    )
+
+    assert_run_ok(result)
+    text = result["telegram_text"]
+    expected_status = (
+        f"SPY ${expected_close:.2f} >= SMA200 ${expected_sma:.2f}"
+        if expected_close >= expected_sma
+        else f"SPY ${expected_close:.2f} < SMA200 ${expected_sma:.2f}"
+    )
+    assert expected_status in text, text
+    assert "$nan" not in text, text
+    assert "DATI MACRO NON VALIDI" not in text, text
+
+
+def test_macro_sma200_nan_hole_is_invalid_not_filled():
+    now = SUMMER_AFTER_CLOSE
+    spy = nyse_ohlc_ending(date(2026, 7, 15), periods=250)
+    spy.iloc[-1, spy.columns.get_loc("Close")] = NAN
+    # Buco nella finestra delle 200 barre della precedente, non nell'ultima.
+    spy.iloc[-180, spy.columns.get_loc("Close")] = NAN
+
+    selected = -2
+    window = spy["Close"].iloc[selected - 199: selected + 1]
+    assert window.isna().any()
+    filled = float(window.mean(skipna=True))
+    assert math.isfinite(filled)
+
+    scout = {"GLD": scout_entry(0.75, 250.0)}
+    scout["GLD"]["asof"] = days_ago_text(1, reference=now)
+
+    result = run_main(
+        complete_state(),
+        scout,
+        now=now,
+        yahoo_frames={"SPY": spy},
+    )
+
+    assert_run_ok(result)
+    text = result["telegram_text"]
+    assert "DATI MACRO NON VALIDI" in text
+    assert "BEARISH" not in text
+    assert "GLD" not in json.loads(result["state_after"])["positions"]
+    assert f"{filled:.2f}" not in text
+
+
+def test_macro_incomplete_last_bar_is_not_used_even_if_finite():
+    now = SUMMER_MIDSESSION
+    spy = nyse_ohlc_ending(date(2026, 7, 15), periods=250)
+    spy.iloc[-1, spy.columns.get_loc("Close")] = 9999.0
+    spy.iloc[-1, spy.columns.get_loc("High")] = 10000.0
+    spy.iloc[-1, spy.columns.get_loc("Low")] = 9998.0
+
+    selected = -2
+    window = spy["Close"].iloc[selected - 199: selected + 1]
+    expected_close = float(spy["Close"].iloc[selected])
+    expected_sma = float(window.mean(skipna=False))
+
+    scout = {"GLD": scout_entry(0.75, 250.0)}
+    scout["GLD"]["asof"] = days_ago_text(1, reference=now)
+
+    result = run_main(
+        complete_state(),
+        scout,
+        now=now,
+        yahoo_frames={"SPY": spy},
+    )
+
+    assert_run_ok(result)
+    text = result["telegram_text"]
+    assert "9999" not in text, text
+    assert f"SPY ${expected_close:.2f}" in text, text
+    assert f"SMA200 ${expected_sma:.2f}" in text, text
+
+
+def test_macro_insufficient_series_is_invalid_not_bearish():
+    now = SUMMER_AFTER_CLOSE
+    spy = nyse_ohlc_ending(date(2026, 7, 15), periods=50)
+    scout = {"GLD": scout_entry(0.75, 250.0)}
+    scout["GLD"]["asof"] = days_ago_text(1, reference=now)
+
+    result = run_main(
+        complete_state(),
+        scout,
+        now=now,
+        yahoo_frames={"SPY": spy},
+    )
+
+    assert_run_ok(result)
+    text = result["telegram_text"]
+    assert "DATI MACRO NON VALIDI" in text
+    assert "BEARISH" not in text
+    assert "GLD" not in json.loads(result["state_after"])["positions"]
+
+
+def test_macro_persistently_invalid_last_bars_freeze_entries():
+    now = SUMMER_AFTER_CLOSE
+    spy = nyse_ohlc_ending(date(2026, 7, 15), periods=250)
+    for offset in range(1, 6):
+        spy.iloc[-offset, spy.columns.get_loc("Close")] = NAN
+
+    state = complete_state(
+        positions={
+            "NVDA": {"qty": 5.0, "entry_price": 100.0, "peak_price": 100.0}
+        }
+    )
+    scout = {
+        "NVDA": scout_entry(0.70, 100.0),
+        "GLD": scout_entry(0.80, 250.0),
+    }
+    for entry in scout.values():
+        entry["asof"] = days_ago_text(1, reference=now)
+
+    result = run_main(
+        state,
+        scout,
+        now=now,
+        yahoo_frames={
+            "SPY": spy,
+            "NVDA": constant_ohlc(date(2026, 7, 15), close=100.0),
+        },
+    )
+
+    assert_run_ok(result)
+    text = result["telegram_text"]
+    assert "DATI MACRO NON VALIDI" in text
+    assert "BEARISH" not in text
+    persisted = json.loads(result["state_after"])
+    assert "NVDA" in persisted["positions"]
+    assert "GLD" not in persisted["positions"]
+
+
+def test_macro_skips_holiday_placeholder_and_uses_session_close():
+    now = EARLY_CLOSE_AFTER
+    spy = nyse_ohlc_ending(date(2026, 11, 27), periods=250, closes=300.0)
+    holiday = pd.Timestamp("2026-11-26")
+    trap = make_ohlc(pd.DatetimeIndex([holiday]), [1.0])
+    spy = pd.concat(
+        [spy[spy.index < holiday], trap, spy[spy.index > holiday]]
+    ).sort_index()
+
+    scout = {"GLD": scout_entry(0.75, 250.0)}
+    scout["GLD"]["asof"] = days_ago_text(2, reference=now)
+
+    result = run_main(
+        complete_state(),
+        scout,
+        now=now,
+        yahoo_frames={"SPY": spy},
+    )
+
+    assert_run_ok(result)
+    text = result["telegram_text"]
+    assert "BEARISH" not in text
+    assert "SPY $1.00" not in text
+    assert "BULLISH" in text
+    assert "GLD" in json.loads(result["state_after"])["positions"]
+
+
+def test_macro_early_close_before_deadline_ignores_same_day_print():
+    now = EARLY_CLOSE_BEFORE
+    spy = nyse_ohlc_ending(date(2026, 11, 27), periods=250, closes=300.0)
+    spy.iloc[-1, spy.columns.get_loc("Close")] = 1.0
+    holiday = pd.Timestamp("2026-11-26")
+    trap = make_ohlc(pd.DatetimeIndex([holiday]), [2.0])
+    spy = pd.concat(
+        [spy[spy.index < holiday], trap, spy[spy.index > holiday]]
+    ).sort_index()
+
+    scout = {"GLD": scout_entry(0.75, 250.0)}
+    scout["GLD"]["asof"] = days_ago_text(2, reference=now)
+
+    result = run_main(
+        complete_state(),
+        scout,
+        now=now,
+        yahoo_frames={"SPY": spy},
+    )
+
+    assert_run_ok(result)
+    text = result["telegram_text"]
+    assert "SPY $1.00" not in text
+    assert "SPY $2.00" not in text
+    assert "BEARISH" not in text
+    assert "BULLISH" in text
+
+
+def test_atr_previous_bar_not_percent_fallback_when_last_ohlc_nan():
+    now = SUMMER_AFTER_CLOSE
+    nvda = constant_ohlc(date(2026, 7, 15), periods=30, close=100.0, width=10.0)
+    for column in ("Open", "High", "Low", "Close"):
+        nvda.iloc[-1, nvda.columns.get_loc(column)] = NAN
+
+    state = complete_state(
+        positions={
+            "NVDA": {"qty": 5.0, "entry_price": 100.0, "peak_price": 100.0}
+        }
+    )
+    scout = {"NVDA": scout_entry(0.70, 97.9)}
+    scout["NVDA"]["asof"] = days_ago_text(1, reference=now)
+
+    result = run_main(
+        state,
+        scout,
+        now=now,
+        yahoo_frames={
+            "SPY": nyse_ohlc_ending(date(2026, 7, 15), periods=250),
+            "NVDA": nvda,
+        },
+    )
+
+    assert_run_ok(result)
+    persisted = json.loads(result["state_after"])
+    # Fallback 2% uscirebbe a 98; ATR ~20 lascia aperta.
+    assert "NVDA" in persisted["positions"]
+    text = result["telegram_text"]
+    assert "STOP-LOSS %" not in text
+    assert "STOP-LOSS ATR" not in text
+
+
+def test_atr_percent_fallback_label_when_no_valid_bar():
+    now = SUMMER_AFTER_CLOSE
+    nvda = constant_ohlc(date(2026, 7, 15), periods=30, close=100.0, width=0.5)
+    for offset in range(1, 6):
+        for column in ("Open", "High", "Low", "Close"):
+            nvda.iloc[-offset, nvda.columns.get_loc(column)] = NAN
+
+    state = complete_state(
+        positions={
+            "NVDA": {"qty": 5.0, "entry_price": 100.0, "peak_price": 100.0}
+        }
+    )
+    scout = {"NVDA": scout_entry(0.70, 97.9)}
+    scout["NVDA"]["asof"] = days_ago_text(1, reference=now)
+
+    result = run_main(
+        state,
+        scout,
+        now=now,
+        yahoo_frames={
+            "SPY": nyse_ohlc_ending(date(2026, 7, 15), periods=250),
+            "NVDA": nvda,
+        },
+    )
+
+    assert_run_ok(result)
+    text = result["telegram_text"]
+    assert "STOP-LOSS %" in text
+    assert "STOP-LOSS ATR" not in text
+    assert "NVDA" not in json.loads(result["state_after"])["positions"]
+
+
+def test_atr_valid_label_and_infinite_bar_does_not_stop():
+    now = SUMMER_AFTER_CLOSE
+    nvda = constant_ohlc(date(2026, 7, 15), periods=30, close=100.0, width=0.5)
+    nvda.iloc[-1, nvda.columns.get_loc("High")] = INF
+    nvda.iloc[-1, nvda.columns.get_loc("Low")] = INF
+    nvda.iloc[-1, nvda.columns.get_loc("Close")] = INF
+
+    state = complete_state(
+        positions={
+            "NVDA": {"qty": 5.0, "entry_price": 100.0, "peak_price": 100.0}
+        }
+    )
+    # 99.1 resta sopra lo stop ATR 2x0.5=1 (99) e sopra il 2% (98).
+    scout = {"NVDA": scout_entry(0.70, 99.1)}
+    scout["NVDA"]["asof"] = days_ago_text(1, reference=now)
+
+    result = run_main(
+        state,
+        scout,
+        now=now,
+        yahoo_frames={
+            "SPY": nyse_ohlc_ending(date(2026, 7, 15), periods=250),
+            "NVDA": nvda,
+        },
+    )
+
+    assert_run_ok(result)
+    persisted = json.loads(result["state_after"])
+    assert "NVDA" in persisted["positions"]
+    text = result["telegram_text"]
+    assert "STOP-LOSS" not in text
+    assert "Infinity" not in text
+    assert "$nan" not in text
+
+
+def test_atr_stop_uses_atr_label_when_series_is_valid():
+    now = SUMMER_AFTER_CLOSE
+    nvda = constant_ohlc(date(2026, 7, 15), periods=30, close=100.0, width=0.5)
+    state = complete_state(
+        positions={
+            "NVDA": {"qty": 5.0, "entry_price": 100.0, "peak_price": 100.0}
+        }
+    )
+    scout = {"NVDA": scout_entry(0.70, 97.9)}
+    scout["NVDA"]["asof"] = days_ago_text(1, reference=now)
+
+    result = run_main(
+        state,
+        scout,
+        now=now,
+        yahoo_frames={
+            "SPY": nyse_ohlc_ending(date(2026, 7, 15), periods=250),
+            "NVDA": nvda,
+        },
+    )
+
+    assert_run_ok(result)
+    text = result["telegram_text"]
+    assert "STOP-LOSS ATR" in text
+    assert "STOP-LOSS %" not in text
+    assert "NVDA" not in json.loads(result["state_after"])["positions"]
 
 
 # =========================================================================

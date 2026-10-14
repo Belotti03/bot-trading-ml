@@ -1,18 +1,25 @@
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import date, datetime, time, timezone
+from zoneinfo import ZoneInfo
+
 import requests
 import yfinance as yf
 import pandas as pd
 
+from research.calendars import nyse_sessions
 from safe_state import (
+    SETTLEMENT_MARGIN,
     asof_problem,
     dump_json_atomic,
     is_finite_number,
+    is_session_complete,
     is_valid_cash,
     is_valid_price,
     is_valid_probability,
+    market_for_ticker,
+    to_bar_date,
     utc_now,
     validate_state_payload
 )
@@ -32,58 +39,228 @@ SCOUT_FILE = "scout_signals.json"
 # margine di consolidamento.
 RUN_NOW = utc_now()
 
+MACRO_BULLISH = "BULLISH"
+MACRO_BEARISH = "BEARISH"
+MACRO_INVALID = "INVALID"
+SMA200_WINDOW = 200
+ATR_PERIOD = 14
+STOP_ATR_MULTIPLIER = 2.0
+TRAILING_ATR_MULTIPLIER = 2.5
+STOP_PCT_FALLBACK = 0.98
+TRAILING_PCT_FALLBACK = 0.975
+
+# Chiusure anticipate NYSE (13:00 ET). research.calendars le lascia nel
+# calendario delle sedute ma non ne distingue l'orario.
+US_EQUITY_EARLY_CLOSE_DATES = frozenset((
+    date(2024, 7, 3),
+    date(2024, 11, 29),
+    date(2024, 12, 24),
+    date(2025, 7, 3),
+    date(2025, 11, 28),
+    date(2025, 12, 24),
+    date(2026, 7, 2),
+    date(2026, 11, 27),
+    date(2026, 12, 24),
+    date(2027, 7, 2),
+    date(2027, 11, 26),
+    date(2027, 12, 24),
+))
+
+
 def abort(message):
     """Interrompe il run senza toccare lo stato persistito."""
     # Messaggio in ASCII: lo stdout del runner non e' garantito UTF-8.
     print(f"ABORT: {message}", file=sys.stderr)
     sys.exit(1)
 
-def get_atr(ticker, period=14):
+
+def _as_scalar(value):
+    """Un solo numero da una cella pandas, oppure None se ambiguo."""
+    if isinstance(value, pd.DataFrame):
+        return None
+    if isinstance(value, pd.Series):
+        if value.size != 1:
+            return None
+        value = value.iloc[0]
+    return value
+
+
+def _column_series(df, name):
+    column = df[name]
+    if isinstance(column, pd.DataFrame):
+        column = column.iloc[:, 0]
+    return column
+
+
+def _flatten_ohlc_columns(df):
+    if isinstance(df.columns, pd.MultiIndex):
+        df = df.copy()
+        df.columns = df.columns.get_level_values(0)
+    return df
+
+
+def _is_us_equity_session_day(bar_date):
+    day = pd.Timestamp(bar_date).normalize()
+    return len(nyse_sessions(day, day)) == 1
+
+
+def _us_equity_bar_complete(bar_date, now):
+    """True se la seduta USA datata bar_date e' chiusa e consolidata."""
+    close_clock = (
+        time(13, 0) if bar_date in US_EQUITY_EARLY_CLOSE_DATES else time(16, 0)
+    )
+    local_close = datetime.combine(
+        bar_date,
+        close_clock,
+        tzinfo=ZoneInfo("America/New_York"),
+    )
+    deadline = local_close.astimezone(timezone.utc) + SETTLEMENT_MARGIN
+    return now >= deadline
+
+
+def _bar_is_usable(df, position, now, market, required):
+    """Barra consolidata, non futura, con i campi richiesti finiti e positivi."""
+    bar_date = to_bar_date(df.index[position])
+    if bar_date > now.date():
+        return False
+
+    if market == "us_equity":
+        if not _is_us_equity_session_day(bar_date):
+            return False
+        if not _us_equity_bar_complete(bar_date, now):
+            return False
+    elif market == "crypto_24_7":
+        if not is_session_complete(bar_date, market, now=now):
+            return False
+    else:
+        return False
+
+    for column in required:
+        if column not in df.columns:
+            return False
+        value = _as_scalar(_column_series(df, column).iloc[position])
+        if not is_valid_price(value):
+            return False
+    return True
+
+
+def _usable_bar_positions(df, now, market, required):
+    """Ultima seduta usabile e al massimo una precedente usabile.
+
+    Si saltano placeholder di festivita' o barre incomplete, ma non si
+    risale la serie: al piu' cinque righe dal fondo, due sedute valide.
+    """
+    positions = []
+    count = len(df)
+    examined = 0
+    for position in range(count - 1, -1, -1):
+        examined += 1
+        if examined > 5:
+            break
+        if _bar_is_usable(df, position, now, market, required):
+            positions.append(position)
+            if len(positions) == 2:
+                break
+    return positions
+
+
+def get_atr(ticker, period=ATR_PERIOD, now=None):
     """Calcola l'ATR in dollari per un dato ticker."""
+    if now is None:
+        now = RUN_NOW
     try:
         df = yf.download(ticker, period="1mo", interval="1d", progress=False)
         if df.empty or len(df) < period:
             return None
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-        high = df['High']
-        low = df['Low']
-        close = df['Close'].shift(1)
-        tr = pd.concat([high - low, (high - close).abs(), (low - close).abs()], axis=1).max(axis=1)
-        atr_val = tr.rolling(window=period).mean().iloc[-1]
-        if isinstance(atr_val, pd.Series):
-            atr_val = atr_val.item()
-        if not is_valid_price(atr_val):
-            print(f"ATR non valido per {ticker} ({atr_val!r}): uso fallback percentuale.")
-            return None
-        return float(atr_val)
+        df = _flatten_ohlc_columns(df)
+        market = market_for_ticker(ticker) or "us_equity"
+        high = _column_series(df, "High")
+        low = _column_series(df, "Low")
+        close = _column_series(df, "Close")
+        previous_close = close.shift(1)
+        true_range = pd.concat(
+            [
+                high - low,
+                (high - previous_close).abs(),
+                (low - previous_close).abs(),
+            ],
+            axis=1,
+        ).max(axis=1)
+        atr_series = true_range.rolling(window=period, min_periods=period).mean()
+        for position in _usable_bar_positions(
+            df, now, market, ("High", "Low", "Close")
+        ):
+            atr_val = _as_scalar(atr_series.iloc[position])
+            if is_valid_price(atr_val):
+                return float(atr_val)
+        print(
+            f"ATR non valido per {ticker}: uso fallback percentuale."
+        )
+        return None
     except Exception as e:
         print(f"Errore calcolo ATR per {ticker}: {e}")
         return None
 
-def check_macro_filter():
-    """Filtro Macro: verifica se S&P 500 (SPY) è sopra la sua SMA 200."""
+
+def check_macro_filter(now=None):
+    """Filtro Macro: SPY contro SMA200 sulla barra USA consolidata."""
+    if now is None:
+        now = RUN_NOW
     try:
         spy = yf.download("SPY", period="1y", interval="1d", progress=False)
-        if spy.empty or len(spy) < 200:
-            return True, "Dati SPY insufficienti (Fallback: OK)"
-        if isinstance(spy.columns, pd.MultiIndex):
-            spy.columns = spy.columns.get_level_values(0)
-        close = spy['Close']
-        sma200 = close.rolling(window=200).mean().iloc[-1]
-        curr_spy = close.iloc[-1]
-        
-        if isinstance(sma200, pd.Series):
-            sma200 = sma200.item()
-        if isinstance(curr_spy, pd.Series):
-            curr_spy = curr_spy.item()
-            
-        is_bullish = float(curr_spy) >= float(sma200)
-        status_str = f"SPY ${curr_spy:.2f} >= SMA200 ${sma200:.2f}" if is_bullish else f"SPY ${curr_spy:.2f} < SMA200 ${sma200:.2f}"
-        return is_bullish, status_str
+        if spy.empty:
+            return (
+                False,
+                MACRO_INVALID,
+                "DATI MACRO NON VALIDI: serie SPY vuota",
+            )
+        spy = _flatten_ohlc_columns(spy)
+        if "Close" not in spy.columns:
+            return (
+                False,
+                MACRO_INVALID,
+                "DATI MACRO NON VALIDI: colonna Close assente",
+            )
+        close = _column_series(spy, "Close")
+        for position in _usable_bar_positions(
+            spy, now, "us_equity", ("Close",)
+        ):
+            if position < SMA200_WINDOW - 1:
+                continue
+            selected_close = close.iloc[: position + 1]
+            sma200 = selected_close.rolling(
+                window=SMA200_WINDOW,
+                min_periods=SMA200_WINDOW,
+            ).mean().iloc[-1]
+            curr_spy = _as_scalar(close.iloc[position])
+            sma200 = _as_scalar(sma200)
+            if not is_valid_price(curr_spy) or not is_valid_price(sma200):
+                continue
+            curr_spy = float(curr_spy)
+            sma200 = float(sma200)
+            if curr_spy >= sma200:
+                return (
+                    True,
+                    MACRO_BULLISH,
+                    f"SPY ${curr_spy:.2f} >= SMA200 ${sma200:.2f}",
+                )
+            return (
+                False,
+                MACRO_BEARISH,
+                f"SPY ${curr_spy:.2f} < SMA200 ${sma200:.2f}",
+            )
+        return (
+            False,
+            MACRO_INVALID,
+            "DATI MACRO NON VALIDI: nessuna barra SPY consolidata con SMA200",
+        )
     except Exception as e:
         print(f"Errore Macro Filter (SPY): {e}")
-        return True, "Errore calcolo SPY (Fallback: OK)"
+        return (
+            False,
+            MACRO_INVALID,
+            "DATI MACRO NON VALIDI: errore calcolo SPY",
+        )
 
 # Caricamento Stato Portafoglio
 # I default valgono SOLO se il file non esiste. Uno stato esistente non viene
@@ -200,26 +377,37 @@ for ticker, pos in state.get("positions", {}).items():
     if qty <= 0:
         continue
 
-    atr = get_atr(ticker)
-    if atr and curr_price > 0:
-        sl_delta = atr * 2.0
-        ts_delta = atr * 2.5
-        stop_loss_price = entry_price - sl_delta
-        trailing_stop_price = peak_price - ts_delta
+    atr = get_atr(ticker, now=RUN_NOW)
+    if is_valid_price(atr) and curr_price > 0:
+        stop_loss_price = entry_price - (float(atr) * STOP_ATR_MULTIPLIER)
+        trailing_stop_price = peak_price - (float(atr) * TRAILING_ATR_MULTIPLIER)
+        stop_label = "ATR"
     else:
-        stop_loss_price = entry_price * 0.98
-        trailing_stop_price = peak_price * 0.975
+        stop_loss_price = entry_price * STOP_PCT_FALLBACK
+        trailing_stop_price = peak_price * TRAILING_PCT_FALLBACK
+        stop_label = "%"
 
-    if curr_price <= trailing_stop_price and curr_price > entry_price:
+    trailing_usable = is_valid_price(trailing_stop_price)
+    stop_usable = is_valid_price(stop_loss_price)
+
+    if (
+        trailing_usable
+        and curr_price <= trailing_stop_price
+        and curr_price > entry_price
+    ):
         p_pct = ((curr_price - entry_price) / entry_price) * 100
         current_cash += qty * curr_price
         stopped_today.add(ticker)
-        events.append(f"🎯 TRAILING-STOP ATR ({p_pct:+.1f}%) su {ticker} (${curr_price:.2f})")
-    elif curr_price <= stop_loss_price:
+        events.append(
+            f"🎯 TRAILING-STOP {stop_label} ({p_pct:+.1f}%) su {ticker} (${curr_price:.2f})"
+        )
+    elif stop_usable and curr_price <= stop_loss_price:
         p_pct = ((curr_price - entry_price) / entry_price) * 100
         current_cash += qty * curr_price
         stopped_today.add(ticker)
-        events.append(f"🛡️ STOP-LOSS ATR ({p_pct:+.1f}%) su {ticker} (${curr_price:.2f})")
+        events.append(
+            f"🛡️ STOP-LOSS {stop_label} ({p_pct:+.1f}%) su {ticker} (${curr_price:.2f})"
+        )
     elif prob < 0.45:
         p_pct = ((curr_price - entry_price) / entry_price) * 100
         current_cash += qty * curr_price
@@ -261,19 +449,21 @@ if not is_valid_price(day_start_val):
 daily_drawdown = ((total_portfolio_val - day_start_val) / day_start_val) * 100
 
 # 2. VERIFICA CONTROLLI DI RISCHIO MACRO E CIRCUIT BREAKER
-macro_ok, macro_msg = check_macro_filter()
+macro_allow_entries, macro_status, macro_msg = check_macro_filter(now=RUN_NOW)
 circuit_breaker_active = daily_drawdown <= -4.0
 
 if circuit_breaker_active:
     events.append(f"🚨 CIRCUIT BREAKER ATTIVATO! Perdita giornaliera {daily_drawdown:.2f}% (soglia -4.0%). Nuovi ingressi congelati.")
 
-if not macro_ok:
+if macro_status == MACRO_BEARISH:
     events.append(f"🐻 MACRO FILTER ORSACCIONE: {macro_msg}. Ingressi congelati.")
+elif macro_status == MACRO_INVALID:
+    events.append(f"⚠️ {macro_msg}. Ingressi congelati.")
 
 # 3. INGRESSI AGENTE SCOUT (CON TETTO DINAMICO 30%/40% + FILTRI DI RISCHIO)
 eligible_candidates = [t for t in top_candidates if t not in stopped_today]
 
-if eligible_candidates and state["cash"] > 500 and macro_ok and not circuit_breaker_active:
+if eligible_candidates and state["cash"] > 500 and macro_allow_entries and not circuit_breaker_active:
     for ticker in eligible_candidates:
         if ticker not in state["positions"] and ticker in scout:
             curr_price = scout[ticker].get("price", 0)
@@ -338,7 +528,13 @@ if events:
     msg += "⚡ EVENTI GIORNALIERI:\n" + "\n".join(events) + "\n\n"
 msg += f"💼 CAPITALE PORTAFOGLIO:\n${total_portfolio_val:,.2f} (Daily P&L: {daily_drawdown:+.2f}%)\n"
 msg += f"📈 P&L Totale: {pnl_tot:+.2f}%\n"
-msg += f"🌐 Macro Status: {'BULLISH 🟢' if macro_ok else 'BEARISH 🔴'}"
+if macro_status == MACRO_BULLISH:
+    macro_status_text = f"BULLISH 🟢 ({macro_msg})"
+elif macro_status == MACRO_BEARISH:
+    macro_status_text = f"BEARISH 🔴 ({macro_msg})"
+else:
+    macro_status_text = "DATI MACRO NON VALIDI"
+msg += f"🌐 Macro Status: {macro_status_text}"
 
 url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": msg})
