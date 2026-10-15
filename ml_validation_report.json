@@ -114,10 +114,10 @@
     "AAPL": {
         "samples": 331,
         "positive_rate": 0.540785498489426,
-        "predicted_positive_rate": 0.49244712990936557,
-        "accuracy": 0.48036253776435045,
-        "brier_score": 0.2690523536820572,
-        "log_loss": 0.7352624967049635
+        "predicted_positive_rate": 0.48942598187311176,
+        "accuracy": 0.48338368580060426,
+        "brier_score": 0.26899882520071283,
+        "log_loss": 0.7351508457588745
     },
     "MSFT": {
         "samples": 331,
