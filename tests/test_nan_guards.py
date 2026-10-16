@@ -249,7 +249,7 @@ runpy.run_path(REPO_ROOT + "/main.py", run_name="__main__")
 '''
 
 
-def run_main(state_payload, scout_payload, now=None, yahoo_frames=None):
+def run_main(state_payload, scout_payload, now=None, yahoo_frames=None, extra_env=None):
     """
     Esegue main.py in una sandbox e riporta esito e stato finale.
 
@@ -292,6 +292,10 @@ def run_main(state_payload, scout_payload, now=None, yahoo_frames=None):
         environment = dict(os.environ)
         environment["TELEGRAM_BOT_TOKEN"] = "dummy-token"
         environment["TELEGRAM_CHAT_ID"] = "dummy-chat"
+        environment.pop("GITHUB_SHA", None)
+        environment.pop("GITHUB_STEP_SUMMARY", None)
+        if extra_env:
+            environment.update(extra_env)
 
         command = [sys.executable, harness_path, REPO_ROOT]
         command.append((now or REFERENCE_NOW).isoformat())
@@ -318,6 +322,18 @@ def run_main(state_payload, scout_payload, now=None, yahoo_frames=None):
             with open(telegram_path, encoding="utf-8") as handle:
                 telegram_text = handle.read()
 
+        safety_path = os.path.join(workdir, "data_safety_report.json")
+        safety_report_file = None
+        if os.path.exists(safety_path):
+            with open(safety_path, encoding="utf-8") as handle:
+                safety_report_file = json.loads(handle.read())
+
+        summary_path = os.path.join(workdir, "step_summary.md")
+        step_summary = None
+        if os.path.exists(summary_path):
+            with open(summary_path, encoding="utf-8") as handle:
+                step_summary = handle.read()
+
         return {
             "returncode": completed.returncode,
             "stdout": completed.stdout,
@@ -329,6 +345,8 @@ def run_main(state_payload, scout_payload, now=None, yahoo_frames=None):
                 os.path.join(workdir, "telegram_calls.txt")
             ),
             "telegram_text": telegram_text,
+            "safety_report_file": safety_report_file,
+            "step_summary": step_summary,
             "leftovers": [
                 name for name in os.listdir(workdir)
                 if name.endswith(".tmp")
@@ -1463,6 +1481,16 @@ def assert_run_ok(result):
     assert result["telegram_text"] is not None
 
 
+def parse_safety_report(result):
+    report = None
+    for line in (result.get("stdout") or "").splitlines():
+        if line.startswith("DATA_SAFETY_REPORT "):
+            report = json.loads(line[len("DATA_SAFETY_REPORT "):])
+    assert report is not None, result.get("stdout")
+    assert result.get("safety_report_file") == report
+    return report
+
+
 def test_nan_comparison_is_false_and_must_not_decide_regime():
     assert (float("nan") >= float("nan")) is False
 
@@ -1868,6 +1896,248 @@ def test_atr_stop_uses_atr_label_when_series_is_valid():
     assert "STOP-LOSS ATR" in text
     assert "STOP-LOSS %" not in text
     assert "NVDA" not in json.loads(result["state_after"])["positions"]
+
+
+def test_incomplete_safety_report_is_not_pass():
+    report = {
+        "report_complete": False,
+        "macro": {"check": "NOT_CHECKED", "status": "INVALID"},
+        "stops": {"check": "NOT_CHECKED", "positions": []},
+    }
+    assert report["report_complete"] is False
+    assert report["macro"]["check"] != "PASS"
+    assert report["stops"]["check"] != "PASS"
+
+
+def test_safety_report_bullish_no_positions_not_applicable_stops():
+    now = SUMMER_AFTER_CLOSE
+    spy = nyse_ohlc_ending(date(2026, 7, 15), periods=250)
+    scout = {"GLD": scout_entry(0.75, 250.0)}
+    scout["GLD"]["asof"] = days_ago_text(1, reference=now)
+    sha = "abc123safetyfix000"
+
+    result = run_main(
+        complete_state(),
+        scout,
+        now=now,
+        yahoo_frames={"SPY": spy},
+        extra_env={
+            "GITHUB_SHA": sha,
+            "GITHUB_STEP_SUMMARY": "step_summary.md",
+        },
+    )
+
+    assert_run_ok(result)
+    persisted = json.loads(result["state_after"])
+    assert "GLD" in persisted["positions"]
+    assert "ENTRATA" in result["telegram_text"] or "GLD" in result["telegram_text"]
+    assert "DATA SAFETY" not in (result["telegram_text"] or "")
+
+    report = parse_safety_report(result)
+    assert report["report_complete"] is True
+    assert report["commit"]["sha"] == sha
+    assert report["commit"]["check"] == "PASS"
+    assert report["macro"]["status"] == "BULLISH"
+    assert report["macro"]["check"] == "PASS"
+    assert report["macro"]["spy_close_valid"] is True
+    assert report["macro"]["sma200_valid"] is True
+    assert report["macro"]["entries_allowed"] is True
+    assert report["macro"]["spy_close"] is not None
+    assert report["stops"]["check"] == "NOT_APPLICABLE"
+    assert report["stops"]["positions"] == []
+    assert "token" not in json.dumps(report).lower()
+    assert "TELEGRAM" not in json.dumps(report)
+    assert result["step_summary"]
+    assert "report_complete" in result["step_summary"]
+
+
+def test_safety_report_does_not_change_bullish_entry_state():
+    now = SUMMER_AFTER_CLOSE
+    spy = nyse_ohlc_ending(date(2026, 7, 15), periods=250)
+    scout = {"GLD": scout_entry(0.75, 250.0)}
+    scout["GLD"]["asof"] = days_ago_text(1, reference=now)
+
+    result = run_main(
+        complete_state(),
+        scout,
+        now=now,
+        yahoo_frames={"SPY": spy},
+    )
+
+    assert_run_ok(result)
+    persisted = json.loads(result["state_after"])
+    assert "GLD" in persisted["positions"]
+    text = result["telegram_text"]
+    assert "BULLISH" in text
+    assert "BEARISH" not in text
+    parse_safety_report(result)
+
+
+def test_safety_report_invalid_macro_fail_no_entry():
+    now = SUMMER_AFTER_CLOSE
+    spy = nyse_ohlc_ending(date(2026, 7, 15), periods=50)
+    scout = {"GLD": scout_entry(0.75, 250.0)}
+    scout["GLD"]["asof"] = days_ago_text(1, reference=now)
+
+    result = run_main(
+        complete_state(),
+        scout,
+        now=now,
+        yahoo_frames={"SPY": spy},
+    )
+
+    assert_run_ok(result)
+    assert "GLD" not in json.loads(result["state_after"])["positions"]
+    assert "BEARISH" not in result["telegram_text"]
+    report = parse_safety_report(result)
+    assert report["macro"]["status"] == "INVALID"
+    assert report["macro"]["check"] == "FAIL"
+    assert report["macro"]["entries_allowed"] is False
+    assert report["macro"]["spy_close"] is None
+    assert report["macro"]["sma200"] is None
+    assert report["invalid_values"]
+    assert report["report_complete"] is True
+
+
+def test_safety_report_bearish_pass_keeps_positions():
+    now = SUMMER_AFTER_CLOSE
+    spy = nyse_ohlc_ending(
+        date(2026, 7, 15),
+        periods=250,
+        closes=np.concatenate([
+            np.full(240, 200.0),
+            np.full(10, 50.0),
+        ]),
+    )
+    state = complete_state(
+        positions={
+            "NVDA": {"qty": 5.0, "entry_price": 100.0, "peak_price": 100.0}
+        }
+    )
+    scout = {
+        "NVDA": scout_entry(0.70, 100.0),
+        "GLD": scout_entry(0.80, 250.0),
+    }
+    for entry in scout.values():
+        entry["asof"] = days_ago_text(1, reference=now)
+
+    result = run_main(
+        state,
+        scout,
+        now=now,
+        yahoo_frames={
+            "SPY": spy,
+            "NVDA": constant_ohlc(date(2026, 7, 15), close=100.0, width=0.5),
+        },
+    )
+
+    assert_run_ok(result)
+    persisted = json.loads(result["state_after"])
+    assert "NVDA" in persisted["positions"]
+    assert "GLD" not in persisted["positions"]
+    report = parse_safety_report(result)
+    assert report["macro"]["status"] == "BEARISH"
+    assert report["macro"]["check"] == "PASS"
+    assert report["macro"]["spy_close_valid"] is True
+    assert report["macro"]["entries_allowed"] is False
+
+
+def test_safety_report_atr_valid_pass_matches_stop_label():
+    now = SUMMER_AFTER_CLOSE
+    nvda = constant_ohlc(date(2026, 7, 15), periods=30, close=100.0, width=0.5)
+    state = complete_state(
+        positions={
+            "NVDA": {"qty": 5.0, "entry_price": 100.0, "peak_price": 100.0}
+        }
+    )
+    scout = {"NVDA": scout_entry(0.70, 97.9)}
+    scout["NVDA"]["asof"] = days_ago_text(1, reference=now)
+
+    result = run_main(
+        state,
+        scout,
+        now=now,
+        yahoo_frames={
+            "SPY": nyse_ohlc_ending(date(2026, 7, 15), periods=250),
+            "NVDA": nvda,
+        },
+    )
+
+    assert_run_ok(result)
+    text = result["telegram_text"]
+    assert "STOP-LOSS ATR" in text
+    assert "STOP-LOSS %" not in text
+    assert "NVDA" not in json.loads(result["state_after"])["positions"]
+    report = parse_safety_report(result)
+    pos = report["stops"]["positions"]
+    assert len(pos) == 1
+    assert pos[0]["ticker"] == "NVDA"
+    assert pos[0]["atr_check"] == "PASS"
+    assert pos[0]["source"] == "ATR"
+    assert pos[0]["atr"] is not None
+    assert pos[0]["stop_loss_check"] == "PASS"
+    assert pos[0]["trailing_check"] == "PASS"
+    assert report["stops"]["check"] == "APPLICABLE"
+
+
+def test_safety_report_atr_fallback_fail_keeps_percent_exit():
+    now = SUMMER_AFTER_CLOSE
+    nvda = constant_ohlc(date(2026, 7, 15), periods=30, close=100.0, width=0.5)
+    for offset in range(1, 6):
+        for column in ("Open", "High", "Low", "Close"):
+            nvda.iloc[-offset, nvda.columns.get_loc(column)] = NAN
+
+    state = complete_state(
+        positions={
+            "NVDA": {"qty": 5.0, "entry_price": 100.0, "peak_price": 100.0}
+        }
+    )
+    scout = {"NVDA": scout_entry(0.70, 97.9)}
+    scout["NVDA"]["asof"] = days_ago_text(1, reference=now)
+
+    result = run_main(
+        state,
+        scout,
+        now=now,
+        yahoo_frames={
+            "SPY": nyse_ohlc_ending(date(2026, 7, 15), periods=250),
+            "NVDA": nvda,
+        },
+    )
+
+    assert_run_ok(result)
+    text = result["telegram_text"]
+    assert "STOP-LOSS %" in text
+    assert "STOP-LOSS ATR" not in text
+    assert "NVDA" not in json.loads(result["state_after"])["positions"]
+    report = parse_safety_report(result)
+    pos = report["stops"]["positions"][0]
+    assert pos["atr_check"] == "FAIL"
+    assert pos["atr"] is None
+    assert pos["source"] == "%"
+    assert pos["stop_loss_check"] == "PASS"
+    assert pos["trailing_check"] == "PASS"
+
+
+def test_safety_report_commit_sha_absent_is_not_checked():
+    now = SUMMER_AFTER_CLOSE
+    spy = nyse_ohlc_ending(date(2026, 7, 15), periods=250)
+    scout = {"GLD": scout_entry(0.75, 250.0)}
+    scout["GLD"]["asof"] = days_ago_text(1, reference=now)
+
+    result = run_main(
+        complete_state(),
+        scout,
+        now=now,
+        yahoo_frames={"SPY": spy},
+    )
+
+    assert_run_ok(result)
+    report = parse_safety_report(result)
+    assert report["commit"]["sha"] is None
+    assert report["commit"]["check"] == "NOT_CHECKED"
+    assert report["report_complete"] is True
+    assert "GLD" in json.loads(result["state_after"])["positions"]
 
 
 # =========================================================================

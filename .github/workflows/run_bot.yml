@@ -37,6 +37,15 @@ jobs:
           python model_engine.py
           python main.py
 
+      - name: 4b. Carica report sicurezza dati
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: data-safety-report
+          path: data_safety_report.json
+          if-no-files-found: ignore
+
       - name: 5. Salva lo Stato del Portafoglio
         run: |
           git config --global user.name "GitHub Action Bot"

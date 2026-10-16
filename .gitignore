@@ -22,3 +22,6 @@ dist/
 
 # Configurazione locale con credenziali
 .env
+
+# Report diagnostico del run live: non va nel commit automatico dello stato
+data_safety_report.json

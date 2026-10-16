@@ -33,6 +33,7 @@ if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
 
 STATE_FILE = "portfolio_state.json"
 SCOUT_FILE = "scout_signals.json"
+DATA_SAFETY_REPORT_FILE = "data_safety_report.json"
 
 # Istante unico di riferimento: tutti i segnali vengono valutati contro lo
 # stesso momento, altrimenti ticker diversi potrebbero cadere ai due lati del
@@ -42,6 +43,10 @@ RUN_NOW = utc_now()
 MACRO_BULLISH = "BULLISH"
 MACRO_BEARISH = "BEARISH"
 MACRO_INVALID = "INVALID"
+CHECK_PASS = "PASS"
+CHECK_FAIL = "FAIL"
+CHECK_NOT_CHECKED = "NOT_CHECKED"
+CHECK_NOT_APPLICABLE = "NOT_APPLICABLE"
 SMA200_WINDOW = 200
 ATR_PERIOD = 14
 STOP_ATR_MULTIPLIER = 2.0
@@ -72,6 +77,210 @@ def abort(message):
     # Messaggio in ASCII: lo stdout del runner non e' garantito UTF-8.
     print(f"ABORT: {message}", file=sys.stderr)
     sys.exit(1)
+
+
+def _invalid_observed(value):
+    """Etichetta diagnostica per un valore non utilizzabile, senza inventare numeri."""
+    if value is None:
+        return "missing"
+    if not is_finite_number(value):
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return "invalid"
+        if number == float("inf") or number == float("-inf"):
+            return "inf"
+        return "nan"
+    if not is_valid_price(value):
+        return "non_positive"
+    return "invalid"
+
+
+def _macro_result(allow_entries, status, reason, spy=None, sma=None):
+    """Tupla operativa invariata più dettagli diagnostici."""
+    spy_ok = is_valid_price(spy)
+    sma_ok = is_valid_price(sma)
+    details = {
+        "status": status,
+        "reason": reason,
+        "spy_close": float(spy) if spy_ok else None,
+        "sma200": float(sma) if sma_ok else None,
+        "spy_close_valid": bool(spy_ok),
+        "sma200_valid": bool(sma_ok),
+    }
+    return allow_entries, status, reason, details
+
+
+def _safety_summary_markdown(payload):
+    macro = payload.get("macro") or {}
+    stops = payload.get("stops") or {}
+    commit = payload.get("commit") or {}
+    lines = [
+        "## Data safety report",
+        "",
+        "- report_complete: %s" % payload.get("report_complete"),
+        "- commit: %s (%s)" % (commit.get("sha"), commit.get("check")),
+        "- macro: %s / %s" % (macro.get("status"), macro.get("check")),
+        "- spy_close_valid: %s sma200_valid: %s" % (
+            macro.get("spy_close_valid"),
+            macro.get("sma200_valid"),
+        ),
+        "- entries_allowed: %s" % macro.get("entries_allowed"),
+        "- stops: %s" % stops.get("check"),
+        "",
+    ]
+    for item in stops.get("positions") or []:
+        lines.append(
+            "- ATR %s: atr=%s source=%s stop_loss=%s trailing=%s"
+            % (
+                item.get("ticker"),
+                item.get("atr_check"),
+                item.get("source"),
+                item.get("stop_loss_check"),
+                item.get("trailing_check"),
+            )
+        )
+    for item in payload.get("invalid_values") or []:
+        lines.append(
+            "- invalid %s %s: %s"
+            % (item.get("ticker") or "", item.get("field"), item.get("observed"))
+        )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _emit_data_safety_report(payload):
+    """Stdout, file e job summary. Qualsiasi errore resta diagnostico."""
+    try:
+        text = json.dumps(payload, separators=(",", ":"), allow_nan=False)
+    except Exception as error:
+        print("DATA_SAFETY_REPORT_ERROR " + str(error))
+        return
+    try:
+        print("DATA_SAFETY_REPORT " + text)
+    except Exception:
+        pass
+    try:
+        with open(DATA_SAFETY_REPORT_FILE, "w", encoding="utf-8") as handle:
+            handle.write(text)
+    except Exception as error:
+        print("DATA_SAFETY_REPORT_WRITE_ERROR " + str(error))
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        try:
+            with open(summary, "a", encoding="utf-8") as handle:
+                handle.write(_safety_summary_markdown(payload))
+        except Exception as error:
+            print("DATA_SAFETY_REPORT_SUMMARY_ERROR " + str(error))
+
+
+def _publish_data_safety_report(
+    macro_allow_entries,
+    macro_status,
+    macro_details,
+    stop_diagnostics,
+):
+    """Costruisce il report dalle decisioni già prese. Non ricalcola nulla."""
+    invalid_values = []
+    spy_ok = bool(macro_details.get("spy_close_valid"))
+    sma_ok = bool(macro_details.get("sma200_valid"))
+    if not spy_ok:
+        invalid_values.append(
+            {"field": "spy_close", "observed": "missing" if macro_details.get("spy_close") is None else "invalid"}
+        )
+    if not sma_ok:
+        invalid_values.append(
+            {"field": "sma200", "observed": "missing" if macro_details.get("sma200") is None else "invalid"}
+        )
+
+    if macro_status in (MACRO_BULLISH, MACRO_BEARISH) and spy_ok and sma_ok:
+        macro_check = CHECK_PASS
+    elif macro_status == MACRO_INVALID:
+        macro_check = CHECK_FAIL
+    else:
+        macro_check = CHECK_NOT_CHECKED
+
+    if not stop_diagnostics:
+        stops = {
+            "check": CHECK_NOT_APPLICABLE,
+            "reason": "no_open_positions",
+            "positions": [],
+        }
+        stops_complete = True
+    else:
+        positions = []
+        stops_complete = True
+        for item in stop_diagnostics:
+            positions.append(item)
+            for key in ("atr_check", "stop_loss_check", "trailing_check"):
+                if item.get(key) not in (CHECK_PASS, CHECK_FAIL):
+                    stops_complete = False
+            if item.get("atr_check") == CHECK_FAIL:
+                invalid_values.append(
+                    {
+                        "ticker": item.get("ticker"),
+                        "field": "atr",
+                        "observed": item.get("atr_observed") or "missing",
+                    }
+                )
+            if item.get("stop_loss_check") == CHECK_FAIL:
+                invalid_values.append(
+                    {
+                        "ticker": item.get("ticker"),
+                        "field": "stop_loss",
+                        "observed": "invalid",
+                    }
+                )
+            if item.get("trailing_check") == CHECK_FAIL:
+                invalid_values.append(
+                    {
+                        "ticker": item.get("ticker"),
+                        "field": "trailing_stop",
+                        "observed": "invalid",
+                    }
+                )
+        stops = {
+            "check": "APPLICABLE",
+            "positions": [
+                {
+                    "ticker": item.get("ticker"),
+                    "atr_check": item.get("atr_check"),
+                    "atr": item.get("atr"),
+                    "source": item.get("source"),
+                    "stop_loss_check": item.get("stop_loss_check"),
+                    "trailing_check": item.get("trailing_check"),
+                }
+                for item in positions
+            ],
+        }
+
+    sha = os.environ.get("GITHUB_SHA") or None
+    if isinstance(sha, str):
+        sha = sha.strip() or None
+    commit = {
+        "sha": sha,
+        "check": CHECK_PASS if sha else CHECK_NOT_CHECKED,
+    }
+    report_complete = (
+        macro_check in (CHECK_PASS, CHECK_FAIL) and stops_complete
+    )
+    payload = {
+        "report_complete": report_complete,
+        "commit": commit,
+        "macro": {
+            "check": macro_check,
+            "status": macro_status,
+            "reason": macro_details.get("reason"),
+            "spy_close": macro_details.get("spy_close"),
+            "sma200": macro_details.get("sma200"),
+            "spy_close_valid": spy_ok,
+            "sma200_valid": sma_ok,
+            "entries_allowed": bool(macro_allow_entries),
+        },
+        "stops": stops,
+        "invalid_values": invalid_values,
+    }
+    _emit_data_safety_report(payload)
 
 
 def _as_scalar(value):
@@ -209,14 +418,14 @@ def check_macro_filter(now=None):
     try:
         spy = yf.download("SPY", period="1y", interval="1d", progress=False)
         if spy.empty:
-            return (
+            return _macro_result(
                 False,
                 MACRO_INVALID,
                 "DATI MACRO NON VALIDI: serie SPY vuota",
             )
         spy = _flatten_ohlc_columns(spy)
         if "Close" not in spy.columns:
-            return (
+            return _macro_result(
                 False,
                 MACRO_INVALID,
                 "DATI MACRO NON VALIDI: colonna Close assente",
@@ -239,24 +448,28 @@ def check_macro_filter(now=None):
             curr_spy = float(curr_spy)
             sma200 = float(sma200)
             if curr_spy >= sma200:
-                return (
+                return _macro_result(
                     True,
                     MACRO_BULLISH,
                     f"SPY ${curr_spy:.2f} >= SMA200 ${sma200:.2f}",
+                    spy=curr_spy,
+                    sma=sma200,
                 )
-            return (
+            return _macro_result(
                 False,
                 MACRO_BEARISH,
                 f"SPY ${curr_spy:.2f} < SMA200 ${sma200:.2f}",
+                spy=curr_spy,
+                sma=sma200,
             )
-        return (
+        return _macro_result(
             False,
             MACRO_INVALID,
             "DATI MACRO NON VALIDI: nessuna barra SPY consolidata con SMA200",
         )
     except Exception as e:
         print(f"Errore Macro Filter (SPY): {e}")
-        return (
+        return _macro_result(
             False,
             MACRO_INVALID,
             "DATI MACRO NON VALIDI: errore calcolo SPY",
@@ -361,6 +574,7 @@ events = []
 updated_positions = {}
 stopped_today = set()
 current_cash = float(state.get("cash", 10000.0))
+stop_diagnostics = []
 
 # 1. GESTIONE POSIZIONI ESISTENTI (CON STOP DINAMICI ATR REATTIVI 2.0x)
 for ticker, pos in state.get("positions", {}).items():
@@ -389,6 +603,18 @@ for ticker, pos in state.get("positions", {}).items():
 
     trailing_usable = is_valid_price(trailing_stop_price)
     stop_usable = is_valid_price(stop_loss_price)
+    atr_valid = is_valid_price(atr)
+    stop_diagnostics.append(
+        {
+            "ticker": ticker,
+            "atr_check": CHECK_PASS if atr_valid else CHECK_FAIL,
+            "atr": float(atr) if atr_valid else None,
+            "atr_observed": None if atr_valid else _invalid_observed(atr),
+            "source": stop_label,
+            "stop_loss_check": CHECK_PASS if stop_usable else CHECK_FAIL,
+            "trailing_check": CHECK_PASS if trailing_usable else CHECK_FAIL,
+        }
+    )
 
     if (
         trailing_usable
@@ -449,7 +675,7 @@ if not is_valid_price(day_start_val):
 daily_drawdown = ((total_portfolio_val - day_start_val) / day_start_val) * 100
 
 # 2. VERIFICA CONTROLLI DI RISCHIO MACRO E CIRCUIT BREAKER
-macro_allow_entries, macro_status, macro_msg = check_macro_filter(now=RUN_NOW)
+macro_allow_entries, macro_status, macro_msg, macro_details = check_macro_filter(now=RUN_NOW)
 circuit_breaker_active = daily_drawdown <= -4.0
 
 if circuit_breaker_active:
@@ -535,6 +761,16 @@ elif macro_status == MACRO_BEARISH:
 else:
     macro_status_text = "DATI MACRO NON VALIDI"
 msg += f"🌐 Macro Status: {macro_status_text}"
+
+try:
+    _publish_data_safety_report(
+        macro_allow_entries,
+        macro_status,
+        macro_details,
+        stop_diagnostics,
+    )
+except Exception as safety_error:
+    print("DATA_SAFETY_REPORT_ERROR " + str(safety_error))
 
 url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": msg})
