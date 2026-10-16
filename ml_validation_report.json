@@ -92,8 +92,8 @@
         "positive_rate": 0.5045317220543807,
         "predicted_positive_rate": 0.5830815709969789,
         "accuracy": 0.5468277945619335,
-        "brier_score": 0.25813535972343243,
-        "log_loss": 0.713735555155923
+        "brier_score": 0.2581329608211678,
+        "log_loss": 0.7137302693570831
     },
     "AMZN": {
         "samples": 331,
@@ -115,17 +115,17 @@
         "samples": 331,
         "positive_rate": 0.5438066465256798,
         "predicted_positive_rate": 0.486404833836858,
-        "accuracy": 0.513595166163142,
-        "brier_score": 0.2664289611801242,
-        "log_loss": 0.7300102851017901
+        "accuracy": 0.5196374622356495,
+        "brier_score": 0.266838043482535,
+        "log_loss": 0.7309350637855873
     },
     "MSFT": {
         "samples": 331,
         "positive_rate": 0.5075528700906344,
         "predicted_positive_rate": 0.44108761329305135,
         "accuracy": 0.4984894259818731,
-        "brier_score": 0.2692728243052659,
-        "log_loss": 0.736670231686557
+        "brier_score": 0.2693083724182994,
+        "log_loss": 0.7367442534650603
     },
     "QQQ": {
         "samples": 331,
