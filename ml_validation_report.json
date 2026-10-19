@@ -106,10 +106,10 @@
     "GOOGL": {
         "samples": 330,
         "positive_rate": 0.5333333333333333,
-        "predicted_positive_rate": 0.38181818181818183,
-        "accuracy": 0.47878787878787876,
-        "brier_score": 0.2802855735733077,
-        "log_loss": 0.762112746448433
+        "predicted_positive_rate": 0.37575757575757573,
+        "accuracy": 0.48484848484848486,
+        "brier_score": 0.28010350222281366,
+        "log_loss": 0.7616982582091653
     },
     "AAPL": {
         "samples": 330,
