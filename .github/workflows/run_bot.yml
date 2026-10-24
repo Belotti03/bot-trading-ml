@@ -37,6 +37,11 @@ jobs:
           python model_engine.py
           python main.py
 
+      - name: 4a. Riepilogo sicurezza dati
+        if: always()
+        continue-on-error: true
+        run: python scripts/render_data_safety_summary.py
+
       - name: 4b. Carica report sicurezza dati
         if: always()
         continue-on-error: true
